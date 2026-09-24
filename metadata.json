@@ -1,0 +1,6 @@
+{
+  "name": "একদর - স্মার্ট দোকান ও বিক্রয় খাতা",
+  "description": "অনলাইন ক্লাউড ডাটাবেজ সহ সম্পূর্ণ পিওএস (POS), স্টক ইনভেন্টরি, কাস্টমার বাকি খাতা ও কুরিয়ার ট্র্যাকিং সিস্টেম।",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
