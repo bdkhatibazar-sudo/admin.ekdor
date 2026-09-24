@@ -19,8 +19,8 @@ const defaultSettings: StoreSettings = {
   vatTaxPercentage: 0,
   defaultDeliveryCharge: 120,
   courierProvider: 'steadfast',
-  courierApiKey: '',
-  courierSecretKey: '',
+  courierApiKey: 'ic4pg2oo3xdnruhyalv7yy4qfgxyoytl',
+  courierSecretKey: 'rheawkurrnuoyznnfypbpjfs',
   supabaseUrl: '',
   supabaseAnonKey: '',
   autoSyncSupabase: true,
@@ -450,7 +450,12 @@ export const loadAppState = (): AppStateData => {
       return defaultState;
     }
     const parsed = JSON.parse(raw);
-    const loadedSettings: StoreSettings = { ...defaultSettings, ...(parsed.settings || {}) };
+    const loadedSettings: StoreSettings = { 
+      ...defaultSettings, 
+      ...(parsed.settings || {}),
+      courierApiKey: (parsed.settings?.courierApiKey || '').trim() || defaultSettings.courierApiKey,
+      courierSecretKey: (parsed.settings?.courierSecretKey || '').trim() || defaultSettings.courierSecretKey,
+    };
 
     const loadedOrders: Order[] = (parsed.orders || initialOrders).map((o: any) => ({
       ...o,

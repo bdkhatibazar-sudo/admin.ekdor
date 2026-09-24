@@ -1378,6 +1378,7 @@ export default function App() {
               setActiveReceiptOrder(ord || activeReceiptOrder);
               setActiveTab('receipt_view');
             }}
+            onUpdateOrderStatus={handleUpdateOrderStatus}
           />
         )}
       </main>

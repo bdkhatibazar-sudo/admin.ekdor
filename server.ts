@@ -28,30 +28,52 @@ const port = getPort();
 
 app.use(express.json({ limit: '10mb' }));
 
-// Steadfast Courier Proxy Route
+// Steadfast / Packzy Courier Proxy Route
 app.all('/api/steadfast/*', async (req, res) => {
   try {
     const targetPath = req.path.replace('/api/steadfast', '');
-    const apiKey = req.headers['api-key'] as string;
-    const secretKey = req.headers['secret-key'] as string;
+    const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+    const apiKey = (req.headers['api-key'] as string) || process.env.STEADFAST_API_KEY || '';
+    const secretKey = (req.headers['secret-key'] as string) || process.env.STEADFAST_SECRET_KEY || '';
 
-    const url = `https://portal.steadfast.com.bd/api/v1${targetPath}`;
-    
-    const response = await fetch(url, {
-      method: req.method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'Api-Key': apiKey } : {}),
-        ...(secretKey ? { 'Secret-Key': secretKey } : {}),
-      },
-      body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? JSON.stringify(req.body) : undefined,
-    });
+    // Primary: https://portal.packzy.com/api/v1 (Official modern Steadfast API)
+    // Fallback: https://portal.steadfast.com.bd/api/v1
+    const baseHosts = ['https://portal.packzy.com/api/v1', 'https://portal.steadfast.com.bd/api/v1'];
+    let lastError: any = null;
 
-    const data = await response.json();
-    res.status(response.status).json(data);
+    for (const baseHost of baseHosts) {
+      try {
+        const url = `${baseHost}${targetPath}${queryString}`;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (apiKey) headers['Api-Key'] = apiKey;
+        if (secretKey) headers['Secret-Key'] = secretKey;
+
+        const response = await fetch(url, {
+          method: req.method,
+          headers,
+          body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? JSON.stringify(req.body) : undefined,
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          return res.status(response.status).json(data);
+        } else {
+          const text = await response.text();
+          return res.status(response.status).send(text);
+        }
+      } catch (err: any) {
+        lastError = err;
+        // Try next baseHost
+      }
+    }
+
+    res.status(502).json({ error: lastError?.message || 'Failed to contact Steadfast/Packzy Courier API' });
   } catch (error: any) {
     console.error('Steadfast proxy error:', error);
-    res.status(502).json({ error: error.message || 'Failed to contact Steadfast Courier API' });
+    res.status(502).json({ error: error.message || 'Failed to contact Steadfast/Packzy Courier API' });
   }
 });
 

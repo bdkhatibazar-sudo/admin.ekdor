@@ -1,7 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { Order, Product, Customer, OrderItem, OrderStatus, StoreSettings } from '../types';
 import { formatCurrency, formatDateTime, resolveWhatsAppNumber, createWhatsAppUrl } from '../utils/formatters';
-import { createSteadfastOrder } from '../services/steadfast';
+import { 
+  createSteadfastOrder, 
+  checkSteadfastFraudScore, 
+  checkSteadfastStatus, 
+  getSteadfastTrackingUrl 
+} from '../services/steadfast';
 import { MoneyInput } from './MoneyInput';
 import { 
   Search, 
@@ -31,7 +36,8 @@ import {
   ChevronDown,
   PackageCheck,
   Zap,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 
 interface OrderHistoryProps {
@@ -79,6 +85,9 @@ export const OrderHistory: React.FC<OrderHistoryProps> = ({
   const [bookingSuccess, setBookingSuccess] = useState<string | null>(null);
   const [isCallingSteadfast, setIsCallingSteadfast] = useState(false);
   const [steadfastError, setSteadfastError] = useState<string | null>(null);
+  const [modalFraudResult, setModalFraudResult] = useState<any | null>(null);
+  const [isCheckingModalFraud, setIsCheckingModalFraud] = useState(false);
+  const [checkingOrderId, setCheckingOrderId] = useState<string | null>(null);
 
   // Filter logic
   const filteredOrders = useMemo(() => {
@@ -342,6 +351,53 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
     setShippingTrackingCode(order.courierTrackingCode || '');
     setBookingSuccess(null);
     setSteadfastError(null);
+    setModalFraudResult(null);
+  };
+
+  // Check Fraud Score in Modal
+  const handleCheckModalFraud = async () => {
+    if (!shippingOrder || !settings) return;
+    const phone = shippingOrder.isDifferentRecipient && shippingOrder.recipientPhone 
+      ? shippingOrder.recipientPhone 
+      : shippingOrder.customerPhone;
+    if (!phone) {
+      alert('গ্রাহকের ফোন নম্বর পাওয়া যায়নি।');
+      return;
+    }
+    setIsCheckingModalFraud(true);
+    try {
+      const res = await checkSteadfastFraudScore(phone, settings);
+      setModalFraudResult(res);
+    } catch (err: any) {
+      alert(err.message || 'ফ্রড চেক ব্যর্থ হয়েছে');
+    } finally {
+      setIsCheckingModalFraud(false);
+    }
+  };
+
+  // Check Live Status for any order
+  const handleCheckLiveStatus = async (order: Order) => {
+    if (!order.courierTrackingCode || !settings) return;
+    setCheckingOrderId(order.id);
+    try {
+      const res = await checkSteadfastStatus(order.courierTrackingCode, settings);
+      if (res.success) {
+        const msg = `পার্সেল ট্র্যাকিং #${order.courierTrackingCode}\nবর্তমান অবস্থা: ${res.deliveryStatusBangla || res.deliveryStatus}`;
+        if (res.deliveryStatus === 'delivered' && order.status !== 'delivered') {
+          if (confirm(`${msg}\n\nকুরিয়ারে পার্সেলটি সফলভাবে ডেলিভার্ড হয়েছে! আপনি কি এই অর্ডারটি "ডেলিভার্ড" হিসেবে মার্ক করতে চান?`)) {
+            onUpdateOrderStatus(order.id, 'delivered');
+          }
+        } else {
+          alert(msg);
+        }
+      } else {
+        alert(res.message || 'স্ট্যাটাস জানা যায়নি');
+      }
+    } catch (err: any) {
+      alert(err.message || 'স্ট্যাটাস চেক ব্যর্থ হয়েছে');
+    } finally {
+      setCheckingOrderId(null);
+    }
   };
 
   // 1-Click Direct API Booking with Steadfast
@@ -856,9 +912,29 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
                             <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
                           </div>
                           {order.courierTrackingCode && (
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              #{order.courierTrackingCode}
-                            </span>
+                            <div className="flex items-center gap-1 justify-center mt-0.5">
+                              <a
+                                href={getSteadfastTrackingUrl(order.courierTrackingCode)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-mono font-medium hover:underline flex items-center gap-0.5"
+                                title="স্টেডফাস্ট ট্র্যাকিং ওপেন করুন"
+                              >
+                                <span>#{order.courierTrackingCode}</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                              {order.status === 'shipped' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCheckLiveStatus(order)}
+                                  disabled={checkingOrderId === order.id}
+                                  className="text-slate-400 hover:text-indigo-600 p-0.5 cursor-pointer"
+                                  title="কুরিয়ার থেকে লাইভ ডেলিভারি স্ট্যাটাস চেক করুন"
+                                >
+                                  <RefreshCw className={`w-2.5 h-2.5 ${checkingOrderId === order.id ? 'animate-spin text-indigo-600' : ''}`} />
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </td>
@@ -1022,6 +1098,51 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
                 </div>
               </div>
 
+              {/* Fraud Check Action Button & Score */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-600 font-medium">গ্রাহকের বিশ্বস্ততা ও রিটার্ন ঝুঁকি:</span>
+                  <button
+                    type="button"
+                    onClick={handleCheckModalFraud}
+                    disabled={isCheckingModalFraud}
+                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {isCheckingModalFraud ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Zap className="w-3.5 h-3.5 text-amber-600" />
+                    )}
+                    <span>{isCheckingModalFraud ? 'যাচাই হচ্ছে...' : 'কাস্টমার ফ্রড চেক'}</span>
+                  </button>
+                </div>
+
+                {modalFraudResult && (
+                  <div className={`p-2.5 rounded-xl border text-xs ${
+                    modalFraudResult.level === 'danger'
+                      ? 'bg-rose-50 text-rose-900 border-rose-200'
+                      : modalFraudResult.level === 'warning'
+                      ? 'bg-amber-50 text-amber-900 border-amber-200'
+                      : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  }`}>
+                    <div className="font-bold flex items-center justify-between">
+                      <span>ফ্রড স্কোর: {modalFraudResult.score ?? 'N/A'}/১০০</span>
+                      <span className="uppercase text-[10px] px-1.5 py-0.2 rounded font-mono bg-white/70">
+                        {modalFraudResult.level}
+                      </span>
+                    </div>
+                    <p className="text-[11px] mt-0.5">
+                      {modalFraudResult.level === 'danger'
+                        ? '⚠️ সতর্কতা: এই নম্বরে পার্সেল রিটার্নের অতীত রেকর্ড আছে। প্রয়োজনে অগ্রিম চার্জ নিশ্চিত করুন।'
+                        : modalFraudResult.level === 'warning'
+                        ? 'মাঝারি রিস্ক স্কোর।'
+                        : '✅ নিরাপদ গ্রাহক, অতীতের পার্সেল ডেলিভারি সফল।'}
+                      {modalFraudResult.totalReports ? ` • মোট রিপোর্ট: ${modalFraudResult.totalReports}` : ''}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   কুরিয়ার সার্ভিস নির্বাচন করুন:
@@ -1116,9 +1237,25 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
               </div>
 
               {bookingSuccess && (
-                <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{bookingSuccess}</span>
+                <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{bookingSuccess}</span>
+                  </div>
+                  {shippingTrackingCode && (
+                    <div className="pt-1 flex items-center justify-between border-t border-emerald-200">
+                      <span className="text-[11px] text-emerald-700">অনলাইন ট্র্যাকিং লিংক:</span>
+                      <a
+                        href={getSteadfastTrackingUrl(shippingTrackingCode)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline flex items-center gap-1"
+                      >
+                        <span>পার্সেল ট্র্যাকিং পেজ</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -8,6 +8,10 @@ import {
   SUPABASE_SQL_SCHEMA 
 } from '../services/supabase';
 import { 
+  pingSteadfast, 
+  getSteadfastBalance 
+} from '../services/steadfast';
+import { 
   Save, 
   Download, 
   Upload, 
@@ -28,7 +32,11 @@ import {
   ChevronUp,
   ExternalLink,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Truck,
+  Eye,
+  EyeOff,
+  Zap
 } from 'lucide-react';
 
 interface BackupAndSettingsProps {
@@ -60,10 +68,60 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
   const [showSqlSchema, setShowSqlSchema] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Courier states (Steadfast / Packzy)
+  const [courierApiKey, setCourierApiKey] = useState(settings.courierApiKey || 'ic4pg2oo3xdnruhyalv7yy4qfgxyoytl');
+  const [courierSecretKey, setCourierSecretKey] = useState(settings.courierSecretKey || 'rheawkurrnuoyznnfypbpjfs');
+  const [showSecretKey, setShowSecretKey] = useState(false);
+  const [isTestingCourier, setIsTestingCourier] = useState(false);
+  const [courierFeedback, setCourierFeedback] = useState<{ success: boolean; message: string; balance?: number } | null>(null);
+
+  const handleTestCourier = async () => {
+    setIsTestingCourier(true);
+    setCourierFeedback(null);
+    try {
+      const pingOk = await pingSteadfast();
+      if (!pingOk) {
+        setCourierFeedback({
+          success: false,
+          message: 'কুরিয়ার সার্ভারে পিং ব্যর্থ হয়েছে। ইন্টারনেট সংযোগ বা প্রক্সি চেক করুন।',
+        });
+        return;
+      }
+
+      const balRes = await getSteadfastBalance({
+        ...formData,
+        courierApiKey: courierApiKey.trim(),
+        courierSecretKey: courierSecretKey.trim(),
+      });
+
+      if (balRes.success) {
+        setCourierFeedback({
+          success: true,
+          balance: balRes.balance,
+          message: `কানেকশন সফল! সার্ভার রেসপন্স: OK (Pong) • বর্তমান কুরিয়ার ব্যালেন্স: ৳${balRes.balance ?? 0}`,
+        });
+      } else {
+        setCourierFeedback({
+          success: false,
+          message: balRes.message || 'API Key বা Secret Key সঠিক নয়।',
+        });
+      }
+    } catch (err: any) {
+      setCourierFeedback({
+        success: false,
+        message: err.message || 'টেস্টে ত্রুটি হয়েছে।',
+      });
+    } finally {
+      setIsTestingCourier(false);
+    }
+  };
+
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     const updated = {
       ...formData,
+      courierApiKey: courierApiKey.trim(),
+      courierSecretKey: courierSecretKey.trim(),
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim(),
     };
@@ -466,8 +524,110 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Store Profile & Invoice Print Settings (Span 6) */}
-        <div className="lg:col-span-6">
+        {/* RIGHT COLUMN: Courier API & Store Profile (Span 6) */}
+        <div className="lg:col-span-6 space-y-5">
+          {/* STEADFAST / PACKZY COURIER API CARD */}
+          <div className="bg-white p-5 rounded-2xl shadow-xs border border-indigo-100 ring-1 ring-indigo-500/10 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                  <Truck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span>স্টেডফাস্ট / প্যাকজি কুরিয়ার এপিআই</span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                      সরাসরি বুকিং
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    portal.packzy.com এপিআই ইন্টিগ্রেশন (১ ক্লিকে পার্সেল বুকিং ও ট্র্যাকিং)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-slate-700">
+                    Api-Key (কুরিয়ার এপিআই কি):
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">Packzy/Steadfast Headers</span>
+                </div>
+                <input
+                  type="text"
+                  value={courierApiKey}
+                  onChange={(e) => setCourierApiKey(e.target.value)}
+                  placeholder="যেমন: ic4pg2oo3xdnruhyalv7yy4qfgxyoytl"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-slate-700">
+                    Secret-Key (কুরিয়ার সিক্রেট কি):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowSecretKey(!showSecretKey)}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    {showSecretKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showSecretKey ? 'লুকান' : 'দেখুন'}</span>
+                  </button>
+                </div>
+                <input
+                  type={showSecretKey ? 'text' : 'password'}
+                  value={courierSecretKey}
+                  onChange={(e) => setCourierSecretKey(e.target.value)}
+                  placeholder="যেমন: rheawkurrnuoyznnfypbpjfs"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                />
+              </div>
+
+              {/* Courier Actions & Test Button */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isTestingCourier || !courierApiKey || !courierSecretKey}
+                  onClick={handleTestCourier}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs shadow-2xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingCourier ? 'animate-spin' : ''}`} />
+                  <span>{isTestingCourier ? 'কানেকশন টেস্ট হচ্ছে...' : 'কানেকশন ও ব্যালেন্স টেস্ট'}</span>
+                </button>
+
+                <a
+                  href="https://portal.packzy.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-indigo-600 flex items-center gap-1 text-[11px] font-medium"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>প্যাকজি পোর্টাল ওপেন করুন</span>
+                </a>
+              </div>
+
+              {/* Status / Feedback */}
+              {courierFeedback && (
+                <div className={`p-2.5 rounded-lg border text-xs font-medium flex items-start gap-2 ${
+                  courierFeedback.success 
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                    : 'bg-rose-50 text-rose-800 border-rose-200'
+                }`}>
+                  {courierFeedback.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <span className="leading-relaxed">{courierFeedback.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">

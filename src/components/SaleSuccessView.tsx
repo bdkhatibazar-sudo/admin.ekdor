@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
-import { Order, StoreSettings } from '../types';
+import { Order, OrderStatus, StoreSettings } from '../types';
 import { formatCurrency, formatDateTime, resolveWhatsAppNumber, createWhatsAppUrl } from '../utils/formatters';
+import { 
+  createSteadfastOrder, 
+  checkSteadfastFraudScore, 
+  checkSteadfastStatus, 
+  getSteadfastTrackingUrl,
+  SteadfastFraudCheckResponse,
+  SteadfastStatusResponse
+} from '../services/steadfast';
 import { 
   CheckCircle2, 
   Printer, 
@@ -22,7 +30,13 @@ import {
   Receipt,
   Share2,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  ExternalLink,
+  ShieldAlert,
+  ShieldCheck,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 
 interface SaleSuccessViewProps {
@@ -31,6 +45,15 @@ interface SaleSuccessViewProps {
   onNewSale: () => void;
   onEditOrder: (order: Order) => void;
   onViewA5Receipt: (order: Order) => void;
+  onUpdateOrderStatus?: (
+    orderId: string,
+    status: OrderStatus,
+    meta?: {
+      courierName?: string;
+      trackingCode?: string;
+      returnLossAmount?: number;
+    }
+  ) => void;
 }
 
 export const SaleSuccessView: React.FC<SaleSuccessViewProps> = ({
@@ -39,8 +62,98 @@ export const SaleSuccessView: React.FC<SaleSuccessViewProps> = ({
   onNewSale,
   onEditOrder,
   onViewA5Receipt,
+  onUpdateOrderStatus,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedTracking, setCopiedTracking] = useState(false);
+
+  // Courier States
+  const [isBookingCourier, setIsBookingCourier] = useState(false);
+  const [courierBookingResult, setCourierBookingResult] = useState<{
+    success: boolean;
+    consignmentId?: string;
+    trackingCode?: string;
+    trackingUrl?: string;
+    message: string;
+  } | null>(null);
+
+  const [isCheckingFraud, setIsCheckingFraud] = useState(false);
+  const [fraudResult, setFraudResult] = useState<SteadfastFraudCheckResponse | null>(null);
+
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [liveStatusResult, setLiveStatusResult] = useState<SteadfastStatusResponse | null>(null);
+
+  const activeTrackingCode = order.courierTrackingCode || courierBookingResult?.trackingCode || courierBookingResult?.consignmentId || '';
+  const isShipped = order.status === 'shipped' || !!activeTrackingCode;
+
+  // 1-Click Steadfast API Booking Handler
+  const handleBookCourier = async () => {
+    setIsBookingCourier(true);
+    setCourierBookingResult(null);
+    try {
+      const res = await createSteadfastOrder(order, settings);
+      if (res.success && (res.consignmentId || res.trackingCode)) {
+        const cId = res.consignmentId || res.trackingCode || '';
+        setCourierBookingResult({
+          success: true,
+          consignmentId: res.consignmentId,
+          trackingCode: res.trackingCode,
+          trackingUrl: res.trackingUrl,
+          message: res.message || 'কুরিয়ারে পার্সেল সফলভাবে বুক হয়েছে!',
+        });
+        if (onUpdateOrderStatus) {
+          onUpdateOrderStatus(order.id, 'shipped', {
+            courierName: 'Steadfast Courier',
+            trackingCode: cId,
+          });
+        }
+      } else {
+        setCourierBookingResult({
+          success: false,
+          message: res.message || 'বুকিং সম্পন্ন হয়নি। কি বা তথ্য যাচাই করুন।',
+        });
+      }
+    } catch (err: any) {
+      setCourierBookingResult({
+        success: false,
+        message: err.message || 'কুরিয়ার সার্ভারে অনুরোধ পাঠানো যায়নি।',
+      });
+    } finally {
+      setIsBookingCourier(false);
+    }
+  };
+
+  // Fraud check handler
+  const handleFraudCheck = async () => {
+    const phone = order.isDifferentRecipient && order.recipientPhone ? order.recipientPhone : order.customerPhone;
+    if (!phone) {
+      alert('গ্রাহকের ফোন নম্বর পাওয়া যায়নি।');
+      return;
+    }
+    setIsCheckingFraud(true);
+    try {
+      const res = await checkSteadfastFraudScore(phone, settings);
+      setFraudResult(res);
+    } catch (err: any) {
+      alert(err.message || 'ফ্রড চেক ব্যর্থ হয়েছে');
+    } finally {
+      setIsCheckingFraud(false);
+    }
+  };
+
+  // Check live status
+  const handleCheckStatus = async () => {
+    if (!activeTrackingCode) return;
+    setIsCheckingStatus(true);
+    try {
+      const res = await checkSteadfastStatus(activeTrackingCode, settings);
+      setLiveStatusResult(res);
+    } catch (err: any) {
+      alert(err.message || 'স্ট্যাটাস চেক ব্যর্থ হয়েছে');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
 
   // Generate clean Bengali formatted text invoice
   const generateTextInvoice = (): string => {
@@ -467,6 +580,217 @@ ${balanceInfo}
           </div>
         </div>
       </div>
+
+      {/* 2.5. ONLINE COURIER DISPATCH & PACKZY / STEADFAST 1-CLICK BOOKING */}
+      {order.orderType === 'online' && (
+        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 shadow-sm border border-indigo-800/40 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold">
+                <Truck className="w-5 h-5 text-indigo-300" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-sm sm:text-base text-white">
+                    স্টেডফাস্ট / প্যাকজি কুরিয়ার বুকিং ও ট্র্যাকিং
+                  </h3>
+                  {isShipped ? (
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      ✓ বুকিং সম্পন্ন
+                    </span>
+                  ) : (
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      বুকিং অপেক্ষমাণ
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-indigo-200/80">
+                  portal.packzy.com এপিআই-এর মাধ্যমে সরাসরি বুকিং ও পার্সেল মনিটরিং
+                </p>
+              </div>
+            </div>
+
+            {/* Fraud check quick trigger */}
+            <button
+              type="button"
+              onClick={handleFraudCheck}
+              disabled={isCheckingFraud}
+              className="self-start sm:self-auto px-3 py-1.5 bg-white/10 hover:bg-white/20 text-indigo-100 text-xs font-semibold rounded-lg border border-white/15 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isCheckingFraud ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
+              )}
+              <span>{isCheckingFraud ? 'যাচাই হচ্ছে...' : 'গ্রাহক ফ্রড চেক'}</span>
+            </button>
+          </div>
+
+          {/* Recipient Details & COD Box */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs bg-white/5 p-3.5 rounded-xl border border-white/10">
+            <div>
+              <span className="text-indigo-200/70 block text-[11px]">প্রাপকের নাম</span>
+              <p className="font-bold text-white truncate">
+                {(order.isDifferentRecipient && order.recipientName ? order.recipientName : order.customerName) || 'গ্রাহকের নাম'}
+              </p>
+            </div>
+            <div>
+              <span className="text-indigo-200/70 block text-[11px]">প্রাপকের মোবাইল</span>
+              <p className="font-mono font-bold text-emerald-300">
+                {(order.isDifferentRecipient && order.recipientPhone ? order.recipientPhone : order.customerPhone) || 'নম্বর নেই'}
+              </p>
+            </div>
+            <div>
+              <span className="text-indigo-200/70 block text-[11px]">ডেলিভারি ঠিকানা</span>
+              <p className="text-white/90 truncate">
+                {(order.isDifferentRecipient && order.recipientAddress ? order.recipientAddress : order.deliveryAddress) || 'ঠিকানা দেওয়া হয়নি'}
+              </p>
+            </div>
+            <div>
+              <span className="text-indigo-200/70 block text-[11px]">কুরিয়ার COD কালেকশন</span>
+              <p className="font-bold text-amber-300 text-sm">
+                ৳{order.codAmount || 0}
+              </p>
+            </div>
+          </div>
+
+          {/* Fraud Check Result Banner */}
+          {fraudResult && (
+            <div className={`p-3 rounded-xl border text-xs font-medium flex items-start justify-between gap-3 ${
+              fraudResult.success
+                ? fraudResult.level === 'danger'
+                  ? 'bg-rose-950/60 text-rose-200 border-rose-600/40'
+                  : fraudResult.level === 'warning'
+                  ? 'bg-amber-950/60 text-amber-200 border-amber-600/40'
+                  : 'bg-emerald-950/60 text-emerald-200 border-emerald-600/40'
+                : 'bg-slate-800 text-slate-300 border-slate-700'
+            }`}>
+              <div className="flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <span>কাস্টমার ফ্রড স্কোর: {fraudResult.score ?? 'N/A'}/১০০</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full uppercase font-mono bg-white/20">
+                      {fraudResult.level}
+                    </span>
+                  </div>
+                  <p className="text-[11px] mt-0.5 opacity-90">
+                    {fraudResult.level === 'danger' 
+                      ? '⚠️ এই নম্বরে কুরিয়ার পার্সেল রিটার্নের রেকর্ড আছে বা ঝুঁকি বেশি। অগ্রিম ডেলিভারি চার্জ নিতে পারেন।'
+                      : fraudResult.level === 'warning'
+                      ? 'সতর্কতা: মাঝারি রিস্ক লেভেল।'
+                      : '✅ নিরাপদ গ্রাহক, অতীতের সফল ডেলিভারি রেকর্ড ভালো।'}
+                    {fraudResult.totalReports ? ` • মোট রিপোর্ট: ${fraudResult.totalReports}` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFraudResult(null)}
+                className="text-white/60 hover:text-white text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Courier Action Buttons & Status */}
+          <div className="space-y-3 pt-1">
+            {!activeTrackingCode ? (
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleBookCourier}
+                  disabled={isBookingCourier}
+                  className="w-full sm:w-auto flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isBookingCourier ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>স্টেডফাস্ট এপিআই-এ পার্সেল বুক হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-emerald-200" />
+                      <span>১-ক্লিকে সরাসরি Steadfast কুরিয়ারে বুকিং করুন</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white/10 p-3.5 rounded-xl border border-white/15 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-indigo-200">ট্র্যাকিং কোড / কনসাইনমেন্ট:</span>
+                    <span className="font-mono font-bold text-sm bg-white/20 px-2 py-0.5 rounded text-white">
+                      {activeTrackingCode}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(activeTrackingCode);
+                        setCopiedTracking(true);
+                        setTimeout(() => setCopiedTracking(false), 2000);
+                      }}
+                      className="p-1 hover:bg-white/20 rounded text-indigo-200 hover:text-white cursor-pointer"
+                      title="ট্র্যাকিং কোড কপি করুন"
+                    >
+                      {copiedTracking ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCheckStatus}
+                      disabled={isCheckingStatus}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                      <span>{isCheckingStatus ? 'যাচাই হচ্ছে...' : 'লাইভ স্ট্যাটাস দেখুন'}</span>
+                    </button>
+
+                    <a
+                      href={getSteadfastTrackingUrl(activeTrackingCode)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3 h-3 text-indigo-200" />
+                      <span>ট্র্যাকিং পেজ</span>
+                    </a>
+                  </div>
+                </div>
+
+                {liveStatusResult && (
+                  <div className="p-2.5 bg-white/10 rounded-lg text-xs flex items-center justify-between text-indigo-100">
+                    <span>কুরিয়ার সার্ভার রেসপন্স:</span>
+                    <span className="font-bold text-emerald-300">
+                      {liveStatusResult.deliveryStatusBangla || liveStatusResult.deliveryStatus}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Courier Booking Result Notification */}
+            {courierBookingResult && (
+              <div className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                courierBookingResult.success
+                  ? 'bg-emerald-950/80 text-emerald-200 border-emerald-500/50'
+                  : 'bg-rose-950/80 text-rose-200 border-rose-500/50'
+              }`}>
+                {courierBookingResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{courierBookingResult.message}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 3. ORDERED PRODUCTS TABLE CARD */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
