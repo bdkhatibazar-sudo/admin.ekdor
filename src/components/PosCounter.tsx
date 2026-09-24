@@ -270,10 +270,13 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     }
 
     setCart((prev) => {
+      const origItem = editingOrder?.items.find((i) => i.productId === product.id);
+      const availableStock = product.stockQty + (origItem ? origItem.quantity : 0);
+
       const existing = prev.find((item) => item.productId === product.id);
       if (existing) {
-        if (existing.quantity >= product.stockQty) {
-          alert(`সর্বোচ্চ উপলব্ধ স্টক: ${product.stockQty} ${product.unit}`);
+        if (existing.quantity >= availableStock) {
+          alert(`সর্বোচ্চ উপলব্ধ মোট স্টক: ${availableStock} ${product.unit}`);
           return prev;
         }
         return prev.map((item) =>
@@ -306,8 +309,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       return;
     }
     const product = products.find((p) => p.id === productId);
-    if (product && newQty > product.stockQty) {
-      alert(`উপলব্ধ স্টক মাত্র ${product.stockQty} ${product.unit}`);
+    const origItem = editingOrder?.items.find((i) => i.productId === productId);
+    const availableStock = product ? product.stockQty + (origItem ? origItem.quantity : 0) : 999999;
+
+    if (product && newQty > availableStock) {
+      alert(`উপলব্ধ মোট স্টক মাত্র ${availableStock} ${product.unit}`);
       return;
     }
     setCart((prev) =>
@@ -317,6 +323,21 @@ export const PosCounter: React.FC<PosCounterProps> = ({
               ...item,
               quantity: newQty,
               total: Math.round(newQty * item.unitPrice),
+            }
+          : item
+      )
+    );
+  };
+
+  const updateUnitPrice = (productId: string, newPrice: number) => {
+    const validPrice = Math.max(0, isNaN(newPrice) ? 0 : newPrice);
+    setCart((prev) =>
+      prev.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              unitPrice: validPrice,
+              total: Math.round(item.quantity * validPrice),
             }
           : item
       )
@@ -1225,27 +1246,43 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                 <div key={item.productId} className="pt-2 flex items-center justify-between gap-2 text-xs">
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
-                    <p className="text-slate-500 text-[11px]">
-                      ৳{item.unitPrice} × {item.quantity} {item.unit}
-                    </p>
+                    <div className="flex items-center gap-1 text-slate-500 text-[11px] mt-0.5">
+                      <span>দর: ৳</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={item.unitPrice}
+                        onChange={(e) => updateUnitPrice(item.productId, Number(e.target.value))}
+                        className="w-14 px-1 py-0.5 text-xs font-semibold bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                        title="একক বিক্রয় দর পরিবর্তন করুন"
+                      />
+                      <span>× {item.unit}</span>
+                    </div>
                   </div>
 
                   {/* Quantity Controller */}
-                  <div className="flex items-center gap-1.5 bg-slate-100 rounded-lg p-0.5">
+                  <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 shrink-0">
                     <button
                       type="button"
                       onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                      className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors"
+                      className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer"
+                      title="পরিমাণ কমান"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
-                    <span className="w-6 text-center font-bold text-slate-800 text-xs">
-                      {item.quantity}
-                    </span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(e) => updateQuantity(item.productId, Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-8 text-center font-bold text-slate-800 text-xs bg-transparent border-0 focus:outline-hidden"
+                      title="পরিমাণ লিখুন"
+                    />
                     <button
                       type="button"
                       onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                      className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors"
+                      className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer"
+                      title="পরিমাণ বাড়ান"
                     >
                       <Plus className="w-3 h-3" />
                     </button>

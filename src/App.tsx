@@ -30,6 +30,7 @@ import { ExpenseTracker } from './components/ExpenseTracker';
 import { PurchaseStockIn } from './components/PurchaseStockIn';
 import { BackupAndSettings } from './components/BackupAndSettings';
 import { ReceiptA5 } from './components/ReceiptA5';
+import { SaleSuccessView } from './components/SaleSuccessView';
 
 // Icons
 import { 
@@ -70,7 +71,13 @@ export default function App() {
   const [customerDirectorySelectedId, setCustomerDirectorySelectedId] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<Order | null>(null);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  const handleStartEditOrder = (order: Order) => {
+    setEditingOrder(order);
+    setActiveTab('pos');
+  };
 
   const {
     currentUser,
@@ -273,14 +280,10 @@ export default function App() {
       };
     });
 
-    if (order.status === 'draft') {
-      alert(`কোটেশন / ড্রাফট #${order.invoiceNumber} সফলভাবে সংরক্ষিত হয়েছে! কাস্টমার নিশ্চিত করলে অর্ডার হিস্ট্রি থেকে 'কনফার্ম' করতে পারবেন।`);
-      setActiveTab('orders');
-    } else {
-      // Switch to A5 Receipt view immediately for printing
-      setActiveReceiptOrder(order);
-      setActiveTab('receipt_view');
-    }
+    // Switch to Sale Success summary view (with sale details, share buttons & edit button)
+    setActiveReceiptOrder(order);
+    setEditingOrder(null);
+    setActiveTab('sale_success');
   };
 
   // Update order status across pipeline (draft -> confirmed -> shipped -> delivered / returned / cancelled)
@@ -437,7 +440,10 @@ export default function App() {
       };
     });
 
-    alert(`চালান #${updatedOrder.invoiceNumber} সফলভাবে এডিট ও স্টক সমন্বয় করা হয়েছে!`);
+    // Navigate to Sale Success view with updated order details
+    setActiveReceiptOrder(updatedOrder);
+    setEditingOrder(null);
+    setActiveTab('sale_success');
   };
 
   // Settle Courier COD payment directly into bank/channel
@@ -1016,7 +1022,10 @@ export default function App() {
             {/* Quick POS Button */}
             <button
               id="nav-quick-pos-btn"
-              onClick={() => setActiveTab('pos')}
+              onClick={() => {
+                setEditingOrder(null);
+                setActiveTab('pos');
+              }}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 sm:px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <ShoppingCart className="w-3.5 h-3.5" />
@@ -1192,7 +1201,19 @@ export default function App() {
             customers={appState.customers}
             initialCustomerId={posPreselectedCustomerId}
             onClearInitialCustomerId={() => setPosPreselectedCustomerId(null)}
+            editingOrder={editingOrder}
+            onCancelEdit={() => {
+              setEditingOrder(null);
+              if (activeReceiptOrder) {
+                setActiveTab('sale_success');
+              } else {
+                setActiveTab('orders');
+              }
+            }}
             onCompleteSale={handleCompleteSale}
+            onUpdateOrder={(updatedOrder, originalOrder) => {
+              handleUpdateOrder(updatedOrder, originalOrder);
+            }}
             onQuickAddCustomer={handleAddCustomer}
           />
         )}
@@ -1223,6 +1244,7 @@ export default function App() {
             onUpdateOrder={handleUpdateOrder}
             onDeleteOrder={handleDeleteOrder}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onEditInPos={handleStartEditOrder}
           />
         )}
 
@@ -1329,10 +1351,32 @@ export default function App() {
           <ReceiptA5
             order={activeReceiptOrder}
             settings={appState.settings}
-            onBack={() => setActiveTab('orders')}
-            onNewSale={() => setActiveTab('pos')}
-            onEditOrder={() => {
-              setActiveTab('orders');
+            onBack={() => setActiveTab('sale_success')}
+            onNewSale={() => {
+              setEditingOrder(null);
+              setActiveTab('pos');
+            }}
+            onEditOrder={(ord) => {
+              handleStartEditOrder(ord || activeReceiptOrder);
+            }}
+          />
+        )}
+
+        {/* TAB 9: SALE SUCCESS SUMMARY VIEW */}
+        {activeTab === 'sale_success' && activeReceiptOrder && (
+          <SaleSuccessView
+            order={activeReceiptOrder}
+            settings={appState.settings}
+            onNewSale={() => {
+              setEditingOrder(null);
+              setActiveTab('pos');
+            }}
+            onEditOrder={(ord) => {
+              handleStartEditOrder(ord || activeReceiptOrder);
+            }}
+            onViewA5Receipt={(ord) => {
+              setActiveReceiptOrder(ord || activeReceiptOrder);
+              setActiveTab('receipt_view');
             }}
           />
         )}

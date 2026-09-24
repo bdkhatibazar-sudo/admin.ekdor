@@ -66,6 +66,7 @@ export interface Order {
   customerName: string;
   customerPhone?: string;     // ১ম নম্বর: বুকিং / কল নম্বর
   customerWhatsapp?: string;  // ২য় নম্বর: হোয়াটসঅ্যাপ নম্বর
+  customerNote?: string;      // গ্রাহক সংক্রান্ত বিশেষ নোট
   deliveryAddress?: string;
 
   // অনলাইন কাস্টমার অন্যের জন্য কিনলে প্রাপকের আলাদা তথ্য

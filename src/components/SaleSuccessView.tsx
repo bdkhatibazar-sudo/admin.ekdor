@@ -90,7 +90,13 @@ ${balanceInfo}
     const targetPhone = resolveWhatsAppNumber(order.customerWhatsapp, order.customerPhone);
     const invoiceText = generateTextInvoice();
     const url = createWhatsAppUrl(targetPhone, invoiceText);
-    window.open(url, '_blank');
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Copy Memo Handler
@@ -101,17 +107,18 @@ ${balanceInfo}
       setCopied(true);
       setTimeout(() => setCopied(false), 3000);
     } catch {
-      alert('মেমো কপি করা সম্ভব হয়নি।');
+      // Fallback
     }
   };
 
   // Direct Thermal Browser Print
   const handlePrintThermal = () => {
-    const printWindow = window.open('', '_blank', 'width=380,height=600');
-    if (!printWindow) {
-      onViewA5Receipt(order);
-      return;
-    }
+    try {
+      const printWindow = window.open('', '_blank', 'width=380,height=600');
+      if (!printWindow) {
+        onViewA5Receipt(order);
+        return;
+      }
 
     const itemsRows = order.items
       .map(
@@ -214,6 +221,9 @@ ${balanceInfo}
       </html>
     `);
     printWindow.document.close();
+    } catch {
+      onViewA5Receipt(order);
+    }
   };
 
   return (
@@ -300,6 +310,23 @@ ${balanceInfo}
                   <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                   <span>{order.deliveryAddress}</span>
                 </p>
+              </div>
+            )}
+
+            {order.isDifferentRecipient && (
+              <div className="pt-2 border-t border-slate-100 bg-amber-50/70 p-2.5 rounded-xl border border-amber-200/80 space-y-0.5">
+                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
+                  🎁 ভিন্ন প্রাপকের তথ্য (Recipient)
+                </span>
+                {order.recipientName && (
+                  <p className="font-bold text-slate-900">{order.recipientName}</p>
+                )}
+                {order.recipientPhone && (
+                  <p className="font-mono text-slate-700 text-[11px]">{order.recipientPhone}</p>
+                )}
+                {order.recipientAddress && (
+                  <p className="text-slate-600 text-[11px]">{order.recipientAddress}</p>
+                )}
               </div>
             )}
 
