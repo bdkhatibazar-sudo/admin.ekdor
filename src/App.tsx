@@ -24,6 +24,7 @@ import { CashBalanceRegister } from './components/CashBalanceRegister';
 import { OrderHistory } from './components/OrderHistory';
 import { StockManagement } from './components/StockManagement';
 import { CustomerKhata } from './components/CustomerKhata';
+import { CustomerDirectory } from './components/CustomerDirectory';
 import { ProfitLossReport } from './components/ProfitLossReport';
 import { ExpenseTracker } from './components/ExpenseTracker';
 import { PurchaseStockIn } from './components/PurchaseStockIn';
@@ -36,6 +37,7 @@ import {
   FileText, 
   Package, 
   Users, 
+  BookOpen,
   TrendingUp, 
   Receipt, 
   Settings, 
@@ -64,6 +66,8 @@ import { useAuth } from './context/AuthContext';
 export default function App() {
   const [appState, setAppState] = useState<AppStateData>(() => loadAppState());
   const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
+  const [posPreselectedCustomerId, setPosPreselectedCustomerId] = useState<string | null>(null);
+  const [customerDirectorySelectedId, setCustomerDirectorySelectedId] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<Order | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -218,16 +222,42 @@ export default function App() {
         });
       }
 
-      // 2. Update Customer due & purchases if identified and not draft
+      // 2. Update Customer due, advance & purchases if identified and not draft
       let updatedCustomers = prev.customers;
       if (order.customerId && order.status !== 'draft') {
         updatedCustomers = prev.customers.map((cust) => {
           if (cust.id === order.customerId) {
+            let currentDue = cust.totalDue || 0;
+            let currentAdvance = cust.advanceBalance || 0;
+
+            // Step 1: If advance balance was applied on this order
+            if (order.appliedAdvance && order.appliedAdvance > 0) {
+              currentAdvance = Math.max(0, currentAdvance - order.appliedAdvance);
+            }
+
+            // Step 2: Add due amount from this order if any
+            if (order.dueAmount > 0) {
+              currentDue += order.dueAmount;
+            }
+
+            // Step 3: If excess payment was made on this order
+            if (order.excessAdvanceAdded && order.excessAdvanceAdded > 0) {
+              if (currentDue > 0) {
+                const settleAmount = Math.min(currentDue, order.excessAdvanceAdded);
+                currentDue -= settleAmount;
+                const rem = order.excessAdvanceAdded - settleAmount;
+                currentAdvance += rem;
+              } else {
+                currentAdvance += order.excessAdvanceAdded;
+              }
+            }
+
             return {
               ...cust,
               totalPurchased: cust.totalPurchased + order.grandTotal,
-              totalPaid: cust.totalPaid + order.paidAmount,
-              totalDue: Math.max(0, (cust.totalDue || 0) + order.dueAmount),
+              totalPaid: cust.totalPaid + order.paidAmount + (order.appliedAdvance || 0),
+              totalDue: currentDue,
+              advanceBalance: currentAdvance,
               updatedAt: new Date().toISOString(),
             };
           }
@@ -499,11 +529,12 @@ export default function App() {
       if (createInwardExpense && batch.otherDeductions > 0) {
         newExpenses.unshift({
           id: `exp-rem-${batch.id}`,
-          category: 'transport',
+          title: `কুরিয়ার বিল কর্তন: ${batch.otherDeductionsNote || 'কেনা মালের কুরিয়ার চার্জ'} (ব্যাচ #${batch.batchNumber})`,
+          category: 'পরিবহন খরচ',
           amount: batch.otherDeductions,
-          description: `কুরিয়ার বিল কর্তন: ${batch.otherDeductionsNote || 'কেনা মালের কুরিয়ার চার্জ'} (ব্যাচ #${batch.batchNumber})`,
           date: batch.date,
           paymentMethod: batch.paymentChannel,
+          note: batch.otherDeductionsNote || 'কেনা মালের কুরিয়ার চার্জ কর্তন',
         });
       }
 
@@ -519,6 +550,57 @@ export default function App() {
     });
 
     alert(`কুরিয়ার ব্যাচ বিল #${batch.batchNumber} সফলভাবে সমন্বিত হয়েছে!\n${batch.orderCount}টি পার্সেল থেকে ৳${batch.actualBankReceived} টাকা ${batch.paymentChannel === 'bank' ? 'ব্যাংক' : batch.paymentChannel === 'bkash' ? 'বিকাশ' : 'ক্যাশ'} তহবিলে জমা হয়েছে।`);
+  };
+
+  // Delete / Revert courier batch remittance (কুরিয়ার রেমিট্যান্স ভাউচার বাতিল)
+  const handleDeleteBatchRemittance = (batchId: string) => {
+    updateStateAndPersist((prev) => {
+      const targetBatch = (prev.courierRemittances || []).find((b) => b.id === batchId);
+      if (!targetBatch) return prev;
+
+      const batchOrderIds = new Set(targetBatch.items.map((it) => it.orderId));
+
+      // Revert orders' courier settlement status to pending
+      const updatedOrders = prev.orders.map((o) => {
+        if (batchOrderIds.has(o.id)) {
+          return {
+            ...o,
+            courierSettlementStatus: 'pending' as CourierSettlementStatus,
+            courierSettledDate: undefined,
+            courierSettledAmount: undefined,
+            courierSettledChannel: undefined,
+            remittanceBatchId: undefined,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return o;
+      });
+
+      // Remove cash adjustment
+      const updatedCashAdjustments = (prev.cashAdjustments || []).filter(
+        (a) => a.id !== `adj-rem-${batchId}`
+      );
+
+      // Remove expense if created
+      const updatedExpenses = (prev.expenses || []).filter(
+        (e) => e.id !== `exp-rem-${batchId}`
+      );
+
+      // Remove batch from remittances
+      const updatedRemittances = (prev.courierRemittances || []).filter(
+        (b) => b.id !== batchId
+      );
+
+      return {
+        ...prev,
+        orders: updatedOrders,
+        cashAdjustments: updatedCashAdjustments,
+        expenses: updatedExpenses,
+        courierRemittances: updatedRemittances,
+      };
+    });
+
+    alert('কুরিয়ার রেমিট্যান্স ভাউচারটি সফলভাবে বাতিল করা হয়েছে এবং পার্সেলগুলো পুনরায় বাকি হিসেবে সংরক্ষিত হয়েছে।');
   };
 
   // Delete an order (returns stock to inventory)
@@ -571,9 +653,22 @@ export default function App() {
     updateStateAndPersist((prev) => {
       const updatedCustomers = prev.customers.map((c) => {
         if (c.id === record.customerId) {
+          const currentDue = c.totalDue || 0;
+          let currentAdvance = c.advanceBalance || 0;
+          let newDue = currentDue;
+
+          if (record.amount <= currentDue) {
+            newDue = currentDue - record.amount;
+          } else {
+            const excess = record.amount - currentDue;
+            newDue = 0;
+            currentAdvance += excess;
+          }
+
           return {
             ...c,
-            totalDue: Math.max(0, (c.totalDue || 0) - record.amount),
+            totalDue: newDue,
+            advanceBalance: currentAdvance,
             totalPaid: (c.totalPaid || 0) + record.amount,
             updatedAt: new Date().toISOString(),
           };
@@ -588,7 +683,7 @@ export default function App() {
       };
     });
 
-    alert(`৳${record.amount} টাকা বাকি আদায় সফলভাবে রেকর্ড করা হয়েছে!`);
+    alert(`৳${record.amount} টাকা বাকি আদায় / জমা সফলভাবে রেকর্ড করা হয়েছে!`);
   };
 
   // Product Operations
@@ -938,7 +1033,8 @@ export default function App() {
             { id: 'orders', label: 'পুরাতন অর্ডার ও এডিট', icon: FileText, badge: appState.orders.length },
             { id: 'purchases', label: 'মাল ক্রয় ও মহাজন খাতা', icon: Boxes, badge: appState.purchases?.length ? `${appState.purchases.length}` : undefined },
             { id: 'stock', label: 'স্টক ও পণ্য তালিকা', icon: Package, badge: todayStats.lowStockCount > 0 ? `${todayStats.lowStockCount} কম` : undefined },
-            { id: 'customers', label: 'বাকি খাতা ও গ্রাহক', icon: Users },
+            { id: 'due_khata', label: 'বাকীর খাতা', icon: BookOpen, badge: todayStats.totalDueMarket > 0 ? `৳${todayStats.totalDueMarket}` : undefined },
+            { id: 'customers', label: 'গ্রাহক', icon: Users, badge: `${appState.customers.length}` },
             { id: 'profit_loss', label: 'লাভ-ক্ষতির রিপোর্ট', icon: TrendingUp },
             { id: 'expenses', label: 'দোকান খরচ', icon: Receipt },
             { id: 'backup_sync', label: 'ব্যাকআপ ও সেটিংস', icon: Settings },
@@ -1036,7 +1132,8 @@ export default function App() {
                 { id: 'orders', label: 'পুরাতন অর্ডার ও এডিট', icon: FileText, badge: appState.orders.length },
                 { id: 'purchases', label: 'মাল ক্রয় ও মহাজন খাতা', icon: Boxes, badge: appState.purchases?.length },
                 { id: 'stock', label: 'স্টক ও পণ্য তালিকা', icon: Package, badge: todayStats.lowStockCount > 0 ? `${todayStats.lowStockCount} কম` : undefined },
-                { id: 'customers', label: 'বাকি খাতা ও গ্রাহক', icon: Users },
+                { id: 'due_khata', label: 'বাকীর খাতা', icon: BookOpen, badge: todayStats.totalDueMarket > 0 ? `৳${todayStats.totalDueMarket}` : undefined },
+                { id: 'customers', label: 'গ্রাহক', icon: Users, badge: `${appState.customers.length}` },
                 { id: 'profit_loss', label: 'লাভ-ক্ষতির রিপোর্ট', icon: TrendingUp },
                 { id: 'expenses', label: 'দোকান খরচ', icon: Receipt },
                 { id: 'backup_sync', label: 'ব্যাকআপ ও সেটিংস', icon: Settings },
@@ -1093,6 +1190,8 @@ export default function App() {
           <PosCounter
             products={appState.products}
             customers={appState.customers}
+            initialCustomerId={posPreselectedCustomerId}
+            onClearInitialCustomerId={() => setPosPreselectedCustomerId(null)}
             onCompleteSale={handleCompleteSale}
             onQuickAddCustomer={handleAddCustomer}
           />
@@ -1137,13 +1236,18 @@ export default function App() {
           />
         )}
 
-        {/* TAB 4: CUSTOMER DUE & KHATA */}
-        {activeTab === 'customers' && (
+        {/* TAB 4: DUE KHATA (CUSTOMER DUE & COURIER COD) */}
+        {activeTab === 'due_khata' && (
           <CustomerKhata
             customers={appState.customers}
             orders={appState.orders}
             duePayments={appState.duePayments}
             settings={appState.settings}
+            courierRemittances={appState.courierRemittances || []}
+            onOpenCustomerProfile={(cust) => {
+              setCustomerDirectorySelectedId(cust.id);
+              setActiveTab('customers');
+            }}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}
             onDeleteCustomer={handleDeleteCustomer}
@@ -1153,6 +1257,29 @@ export default function App() {
               handleUpdateOrder(upd, orig);
             }}
             onSettleCodOrder={handleSettleCodOrder}
+            onSettleBatchRemittance={handleSettleBatchRemittance}
+            onDeleteBatchRemittance={handleDeleteBatchRemittance}
+          />
+        )}
+
+        {/* TAB 5: CUSTOMER DIRECTORY & 360 PROFILE */}
+        {activeTab === 'customers' && (
+          <CustomerDirectory
+            customers={appState.customers}
+            orders={appState.orders}
+            duePayments={appState.duePayments || []}
+            settings={appState.settings}
+            initialCustomerId={customerDirectorySelectedId}
+            onBackToDueKhata={() => setActiveTab('due_khata')}
+            onAddCustomer={handleAddCustomer}
+            onUpdateCustomer={handleUpdateCustomer}
+            onDeleteCustomer={handleDeleteCustomer}
+            onRecordDuePayment={handleRecordDuePayment}
+            onNavigateToPos={(cust) => {
+              setPosPreselectedCustomerId(cust.id);
+              setActiveTab('pos');
+            }}
+            onViewReceipt={handleViewReceipt}
           />
         )}
 

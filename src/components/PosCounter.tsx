@@ -31,20 +31,32 @@ import {
   MessageSquare,
   QrCode,
   Building2,
-  Gift
+  Gift,
+  Sparkles,
+  Edit3
 } from 'lucide-react';
 
 interface PosCounterProps {
   products: Product[];
   customers: Customer[];
+  initialCustomerId?: string | null;
+  onClearInitialCustomerId?: () => void;
+  editingOrder?: Order | null;
+  onCancelEdit?: () => void;
   onCompleteSale: (order: Order) => void;
+  onUpdateOrder?: (updatedOrder: Order, originalOrder: Order) => void;
   onQuickAddCustomer: (customer: Customer) => void;
 }
 
 export const PosCounter: React.FC<PosCounterProps> = ({
   products,
   customers,
+  initialCustomerId,
+  onClearInitialCustomerId,
+  editingOrder,
+  onCancelEdit,
   onCompleteSale,
+  onUpdateOrder,
   onQuickAddCustomer,
 }) => {
   // Sales mode: Store vs Online
@@ -61,6 +73,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [isPaidManuallyTouched, setIsPaidManuallyTouched] = useState(false);
+  const [applyAdvance, setApplyAdvance] = useState(true);
 
   // Customer & Delivery Info
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -78,6 +91,50 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('confirmed');
   const [saleNote, setSaleNote] = useState('');
+
+  // Load editingOrder into form when provided (Full Order Edit Access)
+  useEffect(() => {
+    if (editingOrder) {
+      setOrderType(editingOrder.orderType);
+      setCart(editingOrder.items.map((it) => ({ ...it })));
+      setDiscount(editingOrder.discount || 0);
+      setDeliveryCharge(editingOrder.deliveryCharge || 0);
+      setPaymentMethod(editingOrder.paymentMethod);
+      setPaidAmount(editingOrder.paidAmount);
+      setIsPaidManuallyTouched(true);
+      setSelectedCustomerId(editingOrder.customerId || '');
+      setCustomCustomerName(editingOrder.customerName || '');
+      setCustomCustomerPhone(editingOrder.customerPhone || '');
+      setCustomCustomerWhatsapp(editingOrder.customerWhatsapp || '');
+      setCustomCustomerNote(editingOrder.customerNote || '');
+      setDeliveryAddress(editingOrder.deliveryAddress || '');
+      setIsDifferentRecipient(Boolean(editingOrder.isDifferentRecipient));
+      setRecipientName(editingOrder.recipientName || '');
+      setRecipientPhone(editingOrder.recipientPhone || '');
+      setRecipientAddress(editingOrder.recipientAddress || '');
+      setCourierName(editingOrder.courierName || 'Steadfast Courier');
+      setOrderStatus(editingOrder.status);
+      setSaleNote(editingOrder.note || '');
+    }
+  }, [editingOrder]);
+
+  // Handle initialCustomerId pre-selection from Customer Profile
+  React.useEffect(() => {
+    if (initialCustomerId) {
+      const cust = customers.find((c) => c.id === initialCustomerId);
+      if (cust) {
+        setSelectedCustomerId(cust.id);
+        setCustomCustomerName(cust.name);
+        setCustomCustomerPhone(cust.phone || '');
+        setCustomCustomerWhatsapp(cust.whatsappPhone || '');
+        if (cust.address) setDeliveryAddress(cust.address);
+        setCustomCustomerNote(cust.notes || '');
+      }
+      if (onClearInitialCustomerId) {
+        onClearInitialCustomerId();
+      }
+    }
+  }, [initialCustomerId, customers, onClearInitialCustomerId]);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const customerSearchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -148,7 +205,22 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     return total;
   }, [subtotal, discount, activeDeliveryCharge]);
 
-  // Auto-sync paidAmount with grandTotal if user hasn't manually altered it
+  const selectedCust = useMemo(() => {
+    return customers.find((c) => c.id === selectedCustomerId) || null;
+  }, [customers, selectedCustomerId]);
+
+  const availableAdvance = (selectedCust?.advanceBalance || 0);
+
+  const appliedAdvanceAmount = useMemo(() => {
+    if (!applyAdvance || availableAdvance <= 0) return 0;
+    return Math.min(availableAdvance, grandTotal);
+  }, [applyAdvance, availableAdvance, grandTotal]);
+
+  const netPayable = useMemo(() => {
+    return Math.max(0, grandTotal - appliedAdvanceAmount);
+  }, [grandTotal, appliedAdvanceAmount]);
+
+  // Auto-sync paidAmount with netPayable if user hasn't manually altered it
   React.useEffect(() => {
     if (!isPaidManuallyTouched) {
       if (orderType === 'online') {
@@ -156,31 +228,35 @@ export const PosCounter: React.FC<PosCounterProps> = ({
           setPaidAmount(0); // Full Cash on delivery
         } else if (paymentMethod === 'cash' || paymentMethod === 'bkash') {
           // Default to full paid or advance delivery charge
-          setPaidAmount(grandTotal);
+          setPaidAmount(netPayable);
         }
       } else {
         if (paymentMethod === 'due') {
           setPaidAmount(0);
         } else {
-          setPaidAmount(grandTotal);
+          setPaidAmount(netPayable);
         }
       }
     }
-  }, [grandTotal, paymentMethod, isPaidManuallyTouched, orderType]);
+  }, [netPayable, paymentMethod, isPaidManuallyTouched, orderType]);
 
   const dueAmount = useMemo(() => {
     if (orderType === 'store') {
-      return Math.max(0, grandTotal - (paidAmount || 0));
+      return Math.max(0, netPayable - (paidAmount || 0));
     }
     return 0; // In online, unpaid portion is COD
-  }, [grandTotal, paidAmount, orderType]);
+  }, [netPayable, paidAmount, orderType]);
 
   const codAmount = useMemo(() => {
     if (orderType === 'online') {
-      return Math.max(0, grandTotal - (paidAmount || 0));
+      return Math.max(0, netPayable - (paidAmount || 0));
     }
     return 0;
-  }, [grandTotal, paidAmount, orderType]);
+  }, [netPayable, paidAmount, orderType]);
+
+  const excessPayment = useMemo(() => {
+    return Math.max(0, (paidAmount || 0) - netPayable);
+  }, [paidAmount, netPayable]);
 
   // Cart operations
   const addToCart = (product: Product) => {
@@ -352,6 +428,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       paidAmount,
       dueAmount: orderType === 'store' ? dueAmount : 0,
       codAmount: orderType === 'online' ? codAmount : 0,
+      appliedAdvance: appliedAdvanceAmount > 0 ? appliedAdvanceAmount : undefined,
+      excessAdvanceAdded: excessPayment > 0 ? excessPayment : undefined,
 
       // কুরিয়ার সিওডি কর্তন ও ব্যাংকে নিট প্রাপ্য হিসাব
       courierDeliveryCost: orderType === 'online' ? activeDeliveryCharge : undefined,
@@ -383,6 +461,86 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       if (!confirm('সতর্কতা: অনলাইন কুরিয়ার অর্ডারের জন্য কাস্টমারের মোবাইল নম্বর দেওয়া জরুরি। নম্বর ছাড়াই সেভ করতে চান?')) {
         return;
       }
+    }
+
+    // Full Order Edit Mode Submission
+    if (editingOrder && onUpdateOrder) {
+      let finalCustomerId = selectedCustomerId;
+      const trimmedName = customCustomerName.trim();
+      const trimmedPhone = customCustomerPhone.trim();
+      const trimmedWhatsapp = customCustomerWhatsapp.trim();
+      const finalAddress = deliveryAddress.trim();
+
+      const selectedCust = customers.find((c) => c.id === finalCustomerId);
+      const customerName = selectedCust 
+        ? selectedCust.name 
+        : (trimmedName || (orderType === 'online' ? 'অনলাইন কাস্টমার' : 'নগদ ক্রেতা'));
+      const customerPhone = trimmedPhone || selectedCust?.phone || undefined;
+      const customerWhatsapp = trimmedWhatsapp || selectedCust?.whatsappPhone || undefined;
+      const resolvedAddress = finalAddress || (selectedCust?.address || '');
+
+      const updatedOrder: Order = {
+        ...editingOrder,
+        orderType,
+        customerId: finalCustomerId || undefined,
+        customerName,
+        customerPhone,
+        customerWhatsapp,
+        deliveryAddress: orderType === 'online' ? resolvedAddress : undefined,
+        isDifferentRecipient: orderType === 'online' ? isDifferentRecipient : false,
+        recipientName: orderType === 'online' && isDifferentRecipient ? recipientName.trim() : undefined,
+        recipientPhone: orderType === 'online' && isDifferentRecipient ? recipientPhone.trim() : undefined,
+        recipientAddress: orderType === 'online' && isDifferentRecipient ? recipientAddress.trim() : (orderType === 'online' ? resolvedAddress : undefined),
+        courierName: orderType === 'online' ? courierName : undefined,
+        items: cart,
+        subtotal,
+        discount,
+        deliveryCharge: activeDeliveryCharge,
+        tax: 0,
+        grandTotal,
+        paidAmount,
+        dueAmount: orderType === 'store' ? dueAmount : 0,
+        codAmount: orderType === 'online' ? codAmount : 0,
+        appliedAdvance: appliedAdvanceAmount > 0 ? appliedAdvanceAmount : undefined,
+        excessAdvanceAdded: excessPayment > 0 ? excessPayment : undefined,
+
+        // কুরিয়ার সিওডি কর্তন ও ব্যাংকে প্রাপ্য হিসাব
+        courierDeliveryCost: orderType === 'online' ? activeDeliveryCharge : undefined,
+        courierCodPercentage: orderType === 'online' && codAmount > 0 ? 1 : undefined,
+        courierCodFee: orderType === 'online' && codAmount > 0 
+          ? Math.max(1, Math.round(Math.max(0, codAmount - activeDeliveryCharge) * 0.01))
+          : undefined,
+        courierNetPayable: orderType === 'online' && codAmount > 0
+          ? Math.max(0, codAmount - activeDeliveryCharge - Math.max(1, Math.round(Math.max(0, codAmount - activeDeliveryCharge) * 0.01)))
+          : undefined,
+        courierSettlementStatus: orderType === 'online' && codAmount > 0 ? (editingOrder.courierSettlementStatus || 'pending') : undefined,
+
+        paymentMethod,
+        note: saleNote.trim() || undefined,
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+
+      onUpdateOrder(updatedOrder, editingOrder);
+
+      // Reset local state
+      setCart([]);
+      setDiscount(0);
+      setIsPaidManuallyTouched(false);
+      setSaleNote('');
+      setSelectedCustomerId('');
+      setCustomCustomerName('');
+      setCustomCustomerPhone('');
+      setCustomCustomerWhatsapp('');
+      setCustomCustomerNote('');
+      setDeliveryAddress('');
+      setIsDifferentRecipient(false);
+      setRecipientName('');
+      setRecipientPhone('');
+      setRecipientAddress('');
+      setIsCustomerDropdownOpen(false);
+      setMobileCartOpen(false);
+      return;
     }
 
     const newOrder = createOrderObject(status);
@@ -447,8 +605,41 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
   };
 
   return (
-    <div id="pos-counter-view" className="grid grid-cols-1 lg:grid-cols-12 gap-4 pb-20 lg:pb-0">
-      {/* LEFT COLUMN: Product Catalog & Search (Span 7 or 8) */}
+    <div id="pos-counter-view" className="space-y-3 pb-20 lg:pb-0">
+      {/* Edit Mode Top Alert Banner */}
+      {editingOrder && (
+        <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 text-white p-3.5 sm:p-4 rounded-2xl shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-bold shrink-0">
+              <Edit3 className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base font-black">অর্ডার সংশোধন মোড (Order Edit Mode)</span>
+                <span className="bg-black/20 text-amber-100 border border-white/20 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold">
+                  #{editingOrder.invoiceNumber}
+                </span>
+              </div>
+              <p className="text-xs text-amber-100 mt-0.5">
+                অর্ডারের পণ্যের পরিমাণ, দর, গ্রাহক বা পেমেন্ট পরিবর্তন করে নিচে "সংশোধন সংরক্ষণ করুন" বাটনে চাপুন।
+              </p>
+            </div>
+          </div>
+
+          {onCancelEdit && (
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              className="self-end sm:self-center px-4 py-2 bg-white hover:bg-amber-50 text-amber-900 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
+            >
+              সংশোধন বাতিল
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* LEFT COLUMN: Product Catalog & Search (Span 7 or 8) */}
       <div className="lg:col-span-7 xl:col-span-8 space-y-3">
         {/* Top Controls: Search Bar & Barcode */}
         <div className="bg-white p-3 rounded-xl shadow-xs border border-slate-200 flex flex-col sm:flex-row gap-2.5">
@@ -687,11 +878,19 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                         <UserCheck className="w-4 h-4 text-emerald-700 shrink-0" />
                         <span className="text-xs font-bold text-emerald-950">{selectedCust?.name}</span>
                       </div>
-                      <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
-                        (selectedCust?.totalDue || 0) > 0 ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {(selectedCust?.totalDue || 0) > 0 ? `পূর্বের বাকি: ৳${selectedCust?.totalDue}` : 'বকেয়া নেই'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {(selectedCust?.advanceBalance || 0) > 0 && (
+                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-emerald-600" />
+                            <span>জমা: ৳{selectedCust?.advanceBalance}</span>
+                          </span>
+                        )}
+                        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                          (selectedCust?.totalDue || 0) > 0 ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {(selectedCust?.totalDue || 0) > 0 ? `বাকি: ৳${selectedCust?.totalDue}` : 'বকেয়া নেই'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
@@ -706,6 +905,26 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                         </span>
                       </div>
                     </div>
+
+                    {(selectedCust?.advanceBalance || 0) > 0 && (
+                      <div className="mt-1.5 pt-1.5 border-t border-emerald-200/80 flex items-center justify-between text-xs">
+                        <span className="text-[11px] text-emerald-900 font-semibold flex items-center gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>অগ্রিম জমা ব্যালেন্স: ৳{selectedCust?.advanceBalance}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setApplyAdvance(!applyAdvance)}
+                          className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer transition ${
+                            applyAdvance
+                              ? 'bg-emerald-700 text-white shadow-2xs'
+                              : 'bg-white text-emerald-800 border border-emerald-300 hover:bg-emerald-50'
+                          }`}
+                        >
+                          {applyAdvance ? '✓ জমা সমন্বয় সক্রিয়' : 'জমা সমন্বয় বন্ধ'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })()
@@ -1120,10 +1339,27 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
               </div>
             )}
 
-            {/* Grand Total */}
-            <div className="flex justify-between items-center pt-1 border-t border-slate-200 font-bold text-sm text-slate-900">
-              <span>সর্বমোট প্রদেয়:</span>
-              <span className="text-base text-emerald-700">৳{grandTotal}</span>
+            {/* Grand Total & Advance Adjustment */}
+            <div className="space-y-1 pt-1 border-t border-slate-200">
+              {appliedAdvanceAmount > 0 && (
+                <>
+                  <div className="flex justify-between items-center text-xs text-slate-600">
+                    <span>পণ্যের মোট বিল:</span>
+                    <span className="font-semibold text-slate-800">৳{grandTotal}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      <span>অগ্রিম জমা থেকে সমন্বয়:</span>
+                    </span>
+                    <span>-৳{appliedAdvanceAmount}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between items-center font-bold text-sm text-slate-900 pt-0.5">
+                <span>সর্বমোট প্রদেয়:</span>
+                <span className="text-base text-emerald-700">৳{netPayable}</span>
+              </div>
             </div>
 
             {/* Payment Method selector */}
@@ -1151,7 +1387,7 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                           setPaidAmount(0);
                           setIsPaidManuallyTouched(true);
                         } else if (orderType === 'store' && !isPaidManuallyTouched) {
-                          setPaidAmount(grandTotal);
+                          setPaidAmount(netPayable);
                         }
                       }}
                       className={`flex flex-col items-center justify-center p-1 rounded-lg border text-[11px] font-medium transition-all cursor-pointer ${
@@ -1201,6 +1437,21 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                   <span>৳{orderType === 'online' ? codAmount : dueAmount}</span>
                 </div>
               </div>
+
+              {/* Excess Payment notification */}
+              {excessPayment > 0 && (
+                <div className="col-span-2 bg-emerald-50 border border-emerald-300 rounded-lg p-2 text-xs text-emerald-950 flex items-start gap-1.5 shadow-2xs">
+                  <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">
+                      অতিরিক্ত জমা: ৳{excessPayment}
+                    </span>
+                    <span className="text-[10px] text-emerald-800 block">
+                      বিলের অতিরিক্ত এই টাকা গ্রাহকের অ্যাকাউন্টে "অগ্রিম জমা" হিসেবে যুক্ত থাকবে এবং পরবর্তীতে সমন্বয় করা যাবে।
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* COD Courier Deduction & Bank Receivable Preview */}
@@ -1344,16 +1595,24 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                 disabled={cart.length === 0}
                 onClick={() => handleCheckout(orderStatus)}
                 className={`w-full py-2.5 px-3 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer text-xs sm:text-sm ${
-                  orderStatus === 'confirmed'
+                  editingOrder
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : orderStatus === 'confirmed'
                     ? 'bg-emerald-600 hover:bg-emerald-700'
                     : orderStatus === 'draft'
                     ? 'bg-amber-600 hover:bg-amber-700'
                     : 'bg-purple-600 hover:bg-purple-700'
                 }`}
               >
-                <Printer className="w-4 h-4 shrink-0" />
+                {editingOrder ? (
+                  <Check className="w-4 h-4 shrink-0" />
+                ) : (
+                  <Printer className="w-4 h-4 shrink-0" />
+                )}
                 <span className="truncate">
-                  {orderStatus === 'draft'
+                  {editingOrder
+                    ? `চালান #${editingOrder.invoiceNumber} সংশোধন সংরক্ষণ করুন`
+                    : orderStatus === 'draft'
                     ? 'পেন্ডিং / ড্রাফট হিসেবে সেভ ও মেমো'
                     : orderStatus === 'processing'
                     ? 'প্রসেসিং হিসেবে সেভ ও মেমো'
@@ -1363,6 +1622,7 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       {/* Floating Bottom Bar for Mobile View */}
@@ -1374,10 +1634,12 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
         <button
           id="btn-mobile-cart-toggle"
           onClick={() => setMobileCartOpen(true)}
-          className="py-2 px-5 bg-emerald-600 text-white font-bold text-sm rounded-xl shadow-xs flex items-center gap-2"
+          className={`py-2 px-5 text-white font-bold text-sm rounded-xl shadow-xs flex items-center gap-2 ${
+            editingOrder ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
+          }`}
         >
           <ShoppingCart className="w-4 h-4" />
-          <span>বিল দেখুন ({cart.length})</span>
+          <span>{editingOrder ? 'সংশোধন বিল' : 'বিল দেখুন'} ({cart.length})</span>
         </button>
       </div>
     </div>

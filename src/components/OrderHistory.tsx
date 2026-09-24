@@ -47,6 +47,7 @@ interface OrderHistoryProps {
     newStatus: OrderStatus, 
     options?: { courierName?: string; trackingCode?: string; returnLossAmount?: number }
   ) => void;
+  onEditInPos?: (order: Order) => void;
 }
 
 export const OrderHistory: React.FC<OrderHistoryProps> = ({
@@ -58,6 +59,7 @@ export const OrderHistory: React.FC<OrderHistoryProps> = ({
   onUpdateOrder,
   onDeleteOrder,
   onUpdateOrderStatus,
+  onEditInPos,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | 'this_month'>('all');
@@ -690,7 +692,7 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
                 {order.status !== 'cancelled' && (
                   <button
                     type="button"
-                    onClick={() => handleStartEdit(order)}
+                    onClick={() => (onEditInPos ? onEditInPos(order) : handleStartEdit(order))}
                     className="min-h-[38px] py-1.5 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
@@ -887,7 +889,14 @@ ${order.paidAmount > 0 ? `পরিশোধিত/অগ্রিম: ৳${orde
                             {/* Edit Order */}
                             {order.status !== 'cancelled' && (
                               <button
-                                onClick={() => handleStartEdit(order)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (onEditInPos) {
+                                    onEditInPos(order);
+                                  } else {
+                                    handleStartEdit(order);
+                                  }
+                                }}
                                 className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1 font-bold text-xs"
                                 title="অর্ডার এডিট / সংশোধন করুন"
                               >

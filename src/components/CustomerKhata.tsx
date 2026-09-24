@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Customer, Order, DuePaymentRecord, StoreSettings, CourierSettlementStatus } from '../types';
+import { Customer, Order, DuePaymentRecord, StoreSettings, CourierSettlementStatus, CourierRemittanceBatch } from '../types';
 import { formatCurrency, formatDateTime, resolveWhatsAppNumber, createWhatsAppUrl } from '../utils/formatters';
 import { MoneyInput } from './MoneyInput';
+import { CourierBatchRemittanceModal } from './CourierBatchRemittanceModal';
+import { CourierRemittanceBatchViewModal } from './CourierRemittanceBatchViewModal';
 import { 
   Users, 
   UserPlus, 
@@ -27,7 +29,10 @@ import {
   AlertCircle,
   ExternalLink,
   ChevronRight,
-  Filter
+  Filter,
+  FileText,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 interface CustomerKhataProps {
@@ -35,12 +40,16 @@ interface CustomerKhataProps {
   orders: Order[];
   duePayments: DuePaymentRecord[];
   settings: StoreSettings;
+  courierRemittances?: CourierRemittanceBatch[];
+  onOpenCustomerProfile?: (customer: Customer) => void;
   onAddCustomer: (customer: Customer) => void;
   onUpdateCustomer: (customer: Customer) => void;
   onDeleteCustomer: (customerId: string) => void;
   onRecordDuePayment: (record: DuePaymentRecord) => void;
   onUpdateOrder?: (order: Order) => void;
   onSettleCodOrder?: (order: Order, settledAmount: number, channel: 'bank' | 'bkash' | 'cash', note?: string) => void;
+  onSettleBatchRemittance?: (batch: CourierRemittanceBatch, createInwardExpense?: boolean) => void;
+  onDeleteBatchRemittance?: (batchId: string) => void;
 }
 
 export const CustomerKhata: React.FC<CustomerKhataProps> = ({
@@ -48,15 +57,25 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
   orders,
   duePayments,
   settings,
+  courierRemittances = [],
+  onOpenCustomerProfile,
   onAddCustomer,
   onUpdateCustomer,
   onDeleteCustomer,
   onRecordDuePayment,
   onUpdateOrder,
   onSettleCodOrder,
+  onSettleBatchRemittance,
+  onDeleteBatchRemittance,
 }) => {
   // Top Division: 1. Customer Due vs 2. COD Courier Due
   const [khataMode, setKhataMode] = useState<'customer' | 'cod'>('customer');
+
+  // Batch Remittance States
+  const [isBatchRemittanceModalOpen, setIsBatchRemittanceModalOpen] = useState(false);
+  const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
+  const [viewingBatch, setViewingBatch] = useState<CourierRemittanceBatch | null>(null);
+  const [codSubView, setCodSubView] = useState<'orders' | 'history'>('orders');
 
   // Customer Khata State
   const [searchTerm, setSearchTerm] = useState('');
@@ -227,6 +246,46 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
     });
   }, [codOrders, codStatusFilter, codCourierFilter, codSearchTerm]);
 
+  // Multi-selection helper functions
+  const handleToggleParcelSelection = (orderId: string) => {
+    setSelectedParcelIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  };
+
+  const filteredPendingCodOrders = useMemo(() => {
+    return filteredCodOrders.filter((o) => o.courierSettlementStatus !== 'settled');
+  }, [filteredCodOrders]);
+
+  const allFilteredPendingSelected = useMemo(() => {
+    return (
+      filteredPendingCodOrders.length > 0 &&
+      filteredPendingCodOrders.every((o) => selectedParcelIds.includes(o.id))
+    );
+  }, [filteredPendingCodOrders, selectedParcelIds]);
+
+  const handleToggleSelectAllPending = () => {
+    if (allFilteredPendingSelected) {
+      const pendingIds = new Set(filteredPendingCodOrders.map((o) => o.id));
+      setSelectedParcelIds((prev) => prev.filter((id) => !pendingIds.has(id)));
+    } else {
+      const newIds = new Set([...selectedParcelIds, ...filteredPendingCodOrders.map((o) => o.id)]);
+      setSelectedParcelIds(Array.from(newIds));
+    }
+  };
+
+  const selectedTotalCod = useMemo(() => {
+    return orders
+      .filter((o) => selectedParcelIds.includes(o.id))
+      .reduce((sum, o) => {
+        const codAmt =
+          o.codAmount !== undefined && o.codAmount > 0
+            ? o.codAmount
+            : Math.max(0, o.grandTotal - (o.paidAmount || 0));
+        return sum + codAmt;
+      }, 0);
+  }, [orders, selectedParcelIds]);
+
   // Helpers to resolve order COD values
   const getOrderCodBreakdown = (o: Order) => {
     const isSettled = o.courierSettlementStatus === 'settled';
@@ -394,6 +453,9 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
       return;
     }
 
+    const currentDue = paymentModalCustomer.totalDue || 0;
+    const isOverpayment = paymentAmount > currentDue;
+
     const record: DuePaymentRecord = {
       id: `pay-${Date.now()}`,
       customerId: paymentModalCustomer.id,
@@ -401,7 +463,8 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
       amount: paymentAmount,
       paymentMethod,
       date: new Date().toISOString(),
-      note: paymentNote.trim() || 'বাকি পরিশোধ জমা',
+      note: paymentNote.trim() || (isOverpayment ? 'বকেয়া পরিশোধ ও অতিরিক্ত জমা' : 'বাকি পরিশোধ জমা'),
+      isAdvanceDeposit: isOverpayment,
     };
 
     onRecordDuePayment(record);
@@ -476,10 +539,14 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
             <span>নতুন গ্রাহক যোগ</span>
           </button>
         ) : (
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-blue-50/70 border border-blue-100 px-3 py-1.5 rounded-xl">
-            <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-            <span>হিসাব: কুরিয়ার চার্জ ও ১% ফি কেটে ব্যাংকে নিট প্রাপ্য</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setIsBatchRemittanceModalOpen(true)}
+            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs shrink-0"
+          >
+            <Truck className="w-4 h-4" />
+            <span>+ কুরিয়ার বাল্ক বিল এন্ট্রি</span>
+          </button>
         )}
       </div>
 
@@ -600,14 +667,27 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                           key={cust.id} 
                           className="hover:bg-slate-50/70 transition-colors"
                         >
-                          {/* Name & Phone */}
+                          {/* Name & Phone (Click to open full Customer Profile) */}
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
+                            <div 
+                              onClick={() => {
+                                if (onOpenCustomerProfile) {
+                                  onOpenCustomerProfile(cust);
+                                } else {
+                                  setSelectedCustomerId(cust.id);
+                                }
+                              }}
+                              className="flex items-center gap-2.5 cursor-pointer group select-none"
+                              title="গ্রাহক খাতা ও পূর্ণাঙ্গ প্রোফাইল দেখতে ক্লিক করুন"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-emerald-100 group-hover:bg-indigo-600 group-hover:text-white text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs transition-colors shadow-2xs">
                                 {cust.name.slice(0, 1)}
                               </div>
                               <div>
-                                <p className="font-bold text-slate-900 leading-snug">{cust.name}</p>
+                                <p className="font-bold text-slate-900 group-hover:text-indigo-600 leading-snug flex items-center gap-1 transition-colors">
+                                  <span className="underline decoration-slate-300 group-hover:decoration-indigo-500 underline-offset-2">{cust.name}</span>
+                                  <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                                </p>
                                 <p className="text-xs text-slate-500 flex items-center gap-1 font-mono">
                                   <Phone className="w-3 h-3 text-slate-400" />
                                   {cust.phone}
@@ -679,14 +759,20 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                                 </button>
                               )}
 
-                              {/* View Details Drawer */}
+                              {/* View Full Profile & Ledger */}
                               <button
                                 type="button"
-                                onClick={() => setSelectedCustomerId(cust.id)}
-                                className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                title="লেনদেন খাতা দেখুন"
+                                onClick={() => {
+                                  if (onOpenCustomerProfile) {
+                                    onOpenCustomerProfile(cust);
+                                  } else {
+                                    setSelectedCustomerId(cust.id);
+                                  }
+                                }}
+                                className="p-1.5 text-indigo-700 hover:bg-indigo-50 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                                title="গ্রাহক খাতা ও পূর্ণাঙ্গ প্রোফাইল ওপেন করুন"
                               >
-                                <Receipt className="w-4 h-4" />
+                                <ExternalLink className="w-4 h-4" />
                               </button>
 
                               {/* Edit Customer */}
@@ -783,7 +869,90 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
             </div>
           </div>
 
-          {/* COD Explanation Bar */}
+          {/* Sub-view Navigation: Orders vs Remittance History */}
+          <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit">
+              <button
+                type="button"
+                onClick={() => setCodSubView('orders')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  codSubView === 'orders'
+                    ? 'bg-white text-blue-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5 text-blue-600" />
+                <span>পার্সেল তালিকা ({codOrders.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCodSubView('history')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  codSubView === 'history'
+                    ? 'bg-white text-blue-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5 text-indigo-600" />
+                <span>পূর্বের কুরিয়ার রসিদ/শিট সমূহ ({courierRemittances.length})</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsBatchRemittanceModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
+            >
+              <Truck className="w-4 h-4" />
+              <span>+ কুরিয়ার বাল্ক বিল এন্ট্রি (একসাথে রিকনসিল)</span>
+            </button>
+          </div>
+
+          {/* Persistent Multi-Select Action Banner */}
+          {selectedParcelIds.length > 0 && codSubView === 'orders' && (
+            <div className="bg-gradient-to-r from-blue-700 via-indigo-800 to-blue-900 text-white p-3.5 rounded-xl shadow-md flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-300" />
+                </div>
+                <div>
+                  <div className="font-bold text-xs sm:text-sm flex items-center gap-2">
+                    <span>{selectedParcelIds.length} টি পার্সেল নির্বাচিত হয়েছে</span>
+                    <span className="bg-white/20 text-white text-[11px] px-2 py-0.5 rounded-full font-semibold">
+                      মোট কালেকশন: ৳{selectedTotalCod}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-blue-200 mt-0.5">
+                    এক ক্লিকে কুরিয়ার বিল শিট অনুযায়ী কালেকশন, অন্যান্য কর্তন ও ১% চার্জ বাদ দিয়ে ব্যাংকে জমা সমন্বয় করুন
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedParcelIds([])}
+                  className="px-3 py-1.5 text-xs text-blue-200 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer"
+                >
+                  নির্বাচন বাতিল
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBatchRemittanceModalOpen(true)}
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-xl text-xs sm:text-sm transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Truck className="w-4 h-4" />
+                  <span>বিল সমন্বয় করুন ({selectedParcelIds.length} টি) ➔</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-VIEW 1: পার্সেল তালিকা (ORDERS VIEW) */}
+          {codSubView === 'orders' && (
+            <div className="space-y-4">
+              {/* COD Explanation Bar */}
           <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
             <div className="flex items-start sm:items-center gap-2 text-blue-900">
               <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 sm:mt-0" />
@@ -881,15 +1050,25 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                     key={o.id}
                     className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-2.5"
                   >
-                    {/* Header: Invoice, Date, Status */}
+                    {/* Header: Checkbox, Invoice, Date, Status */}
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="font-mono font-bold text-slate-900 text-xs block">
-                          #{o.invoiceNumber}
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          {formatDateTime(o.createdAt)}
-                        </span>
+                      <div className="flex items-center gap-2">
+                        {!isSettled && (
+                          <input
+                            type="checkbox"
+                            checked={selectedParcelIds.includes(o.id)}
+                            onChange={() => handleToggleParcelSelection(o.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        )}
+                        <div>
+                          <span className="font-mono font-bold text-slate-900 text-xs block">
+                            #{o.invoiceNumber}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {formatDateTime(o.createdAt)}
+                          </span>
+                        </div>
                       </div>
 
                       <span
@@ -993,6 +1172,15 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
               <table className="w-full text-left border-collapse text-xs sm:text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider">
+                    <th className="py-3 px-3 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredPendingSelected}
+                        onChange={handleToggleSelectAllPending}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="সকল বকেয়া পার্সেল একসাথে নির্বাচন করুন"
+                      />
+                    </th>
                     <th className="py-3 px-4">চালান ও তারিখ</th>
                     <th className="py-3 px-4">গ্রাহক ও ডেলিভারি</th>
                     <th className="py-3 px-4">কুরিয়ার ও ট্র্যাকিং</th>
@@ -1006,7 +1194,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredCodOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400">
+                      <td colSpan={9} className="py-12 text-center text-slate-400">
                         <Truck className="w-10 h-10 mx-auto text-slate-300 mb-2 opacity-60" />
                         <p className="font-semibold text-slate-600 text-sm">কোনো সিওডি অর্ডার পাওয়া যায়নি</p>
                         <p className="text-xs text-slate-400 mt-0.5">নতুন অনলাইন সেল করতে POS কাউন্টারে যান</p>
@@ -1015,12 +1203,29 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                   ) : (
                     filteredCodOrders.map((o) => {
                       const { codAmt, deliveryCost, codFee, netPayable, isSettled } = getOrderCodBreakdown(o);
+                      const isChecked = selectedParcelIds.includes(o.id);
 
                       return (
                         <tr 
                           key={o.id} 
-                          className="hover:bg-slate-50/70 transition-colors"
+                          className={`transition-colors ${
+                            isChecked ? 'bg-blue-50/60 font-medium' : 'hover:bg-slate-50/70'
+                          }`}
                         >
+                          {/* Selection Checkbox */}
+                          <td className="py-3 px-3 text-center">
+                            {!isSettled ? (
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleParcelSelection(o.id)}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              />
+                            ) : (
+                              <Check className="w-4 h-4 text-emerald-500 mx-auto" />
+                            )}
+                          </td>
+
                           {/* Invoice & Date */}
                           <td className="py-3 px-4">
                             <span className="font-mono font-bold text-slate-900 block">
@@ -1122,6 +1327,171 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
               </table>
             </div>
           </div>
+            </div>
+          )}
+
+          {/* SUB-VIEW 2: পূর্বের কুরিয়ার রেমিট্যান্স শিট সমূহ (REMITTANCE HISTORY) */}
+          {codSubView === 'history' && (
+            <div className="space-y-3">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-indigo-700" />
+                    <span className="font-bold text-xs sm:text-sm text-slate-800">
+                      পূর্বের কুরিয়ার রেমিট্যান্স ভাউচার ও রিকনসিলিয়েশন তালিকা ({courierRemittances.length} টি)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsBatchRemittanceModalOpen(true)}
+                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer w-fit"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>নতুন কুরিয়ার বিল এন্ট্রি</span>
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                    <thead>
+                      <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider">
+                        <th className="py-3 px-4">ভাউচার ও তারিখ</th>
+                        <th className="py-3 px-4">কুরিয়ার সংস্থা</th>
+                        <th className="py-3 px-4 text-center">পার্সেল সংখ্যা</th>
+                        <th className="py-3 px-4 text-right">মোট কালেকশন</th>
+                        <th className="py-3 px-4 text-right">ডেলিভারি ও কর্তন</th>
+                        <th className="py-3 px-4 text-right">১% সিওডি ফি</th>
+                        <th className="py-3 px-4 text-right">ব্যাংকে নিট ক্রেডিট</th>
+                        <th className="py-3 px-4 text-center">মাধ্যম</th>
+                        <th className="py-3 px-4 text-center">অ্যাকশন</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {courierRemittances.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="py-12 text-center text-slate-400">
+                            <Receipt className="w-10 h-10 mx-auto text-slate-300 mb-2 opacity-60" />
+                            <p className="font-semibold text-slate-600 text-sm">
+                              এখনো কোনো কুরিয়ার রেমিট্যান্স বা বাল্ক বিল এন্ট্রি করা হয়নি
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                              কুরিয়ার একসাথে বিল দিলে "+ কুরিয়ার বাল্ক বিল এন্ট্রি" বাটনে ক্লিক করে চালান তালিকা, ডেলিভারি চার্জ, কেনা মালের চার্জ ও ১% সিওডি ফি সমন্বয় করে এক ক্লিকে ব্যাংকে জমা করুন।
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setIsBatchRemittanceModalOpen(true)}
+                              className="mt-3.5 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                            >
+                              <Truck className="w-4 h-4" />
+                              <span>প্রথম কুরিয়ার বিল এন্ট্রি করুন</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ) : (
+                        courierRemittances.map((b) => (
+                          <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                            {/* Voucher & Date */}
+                            <td className="py-3 px-4">
+                              <span className="font-mono font-bold text-slate-900 block">
+                                #{b.batchNumber}
+                              </span>
+                              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {b.date}
+                              </span>
+                            </td>
+
+                            {/* Courier */}
+                            <td className="py-3 px-4">
+                              <span className="font-bold text-slate-800">{b.courierName}</span>
+                              {b.bankReference && (
+                                <span className="text-[11px] text-slate-500 block truncate max-w-[150px]">
+                                  Ref: {b.bankReference}
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Parcel Count */}
+                            <td className="py-3 px-4 text-center">
+                              <span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold text-xs">
+                                {b.orderCount} টি
+                              </span>
+                            </td>
+
+                            {/* Total Collection */}
+                            <td className="py-3 px-4 text-right font-bold text-slate-900">
+                              ৳{b.totalCollected}
+                            </td>
+
+                            {/* Deductions */}
+                            <td className="py-3 px-4 text-right">
+                              <span className="font-semibold text-rose-600 block">
+                                -৳{b.totalDeliveryAndDeductions}
+                              </span>
+                              {b.otherDeductions > 0 && (
+                                <span className="text-[10px] text-amber-700 block font-medium">
+                                  (অন্যান্য: ৳{b.otherDeductions})
+                                </span>
+                              )}
+                            </td>
+
+                            {/* 1% COD Fee */}
+                            <td className="py-3 px-4 text-right font-semibold text-rose-600">
+                              -৳{b.codFeeAmount}
+                            </td>
+
+                            {/* Net Bank Credit */}
+                            <td className="py-3 px-4 text-right">
+                              <span className="font-black text-sm text-emerald-700">
+                                ৳{b.actualBankReceived}
+                              </span>
+                            </td>
+
+                            {/* Channel */}
+                            <td className="py-3 px-4 text-center">
+                              <span className="inline-block bg-slate-100 text-slate-700 text-[11px] font-semibold px-2 py-0.5 rounded-md capitalize">
+                                {b.paymentChannel === 'bank' ? 'ব্যাংক' : b.paymentChannel === 'bkash' ? 'বিকাশ' : 'নগদ'}
+                              </span>
+                            </td>
+
+                            {/* Action Buttons */}
+                            <td className="py-3 px-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingBatch(b)}
+                                  className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                                  title="বিল ভাউচার ও বিস্তারিত প্রিন্ট করুন"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                  <span>রসিদ</span>
+                                </button>
+
+                                {onDeleteBatchRemittance && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm(`আপনি কি নিশ্চিত যে রেমিট্যান্স ভাউচার #${b.batchNumber} বাতিল করতে চান? এতে অর্ডারের স্ট্যাটাস পুনরায় বাকি (pending) হয়ে যাবে।`)) {
+                                        onDeleteBatchRemittance(b.id);
+                                      }
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                    title="ভাউচার বাতিল করুন"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1548,12 +1918,28 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                 />
               </div>
 
-              <div className="p-2.5 bg-emerald-50 rounded-lg text-xs flex justify-between">
-                <span>পরিশোধের পর অবশিষ্ট বাকি:</span>
-                <strong className="text-rose-600">
-                  ৳{Math.max(0, paymentModalCustomer.totalDue - paymentAmount)}
-                </strong>
-              </div>
+              {paymentAmount > paymentModalCustomer.totalDue ? (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs space-y-1">
+                  <div className="flex justify-between text-emerald-800 font-bold">
+                    <span>অবশিষ্ট বাকি:</span>
+                    <span>৳০ (সম্পূর্ণ পরিশোধিত)</span>
+                  </div>
+                  <div className="flex justify-between text-emerald-700 font-semibold border-t border-emerald-200/60 pt-1">
+                    <span>অতিরিক্ত জমা ব্যালেন্স:</span>
+                    <span>+৳{paymentAmount - paymentModalCustomer.totalDue}</span>
+                  </div>
+                  <p className="text-[10px] text-emerald-600">
+                    * এই অতিরিক্ত টাকা গ্রাহকের অ্যাকাউন্টে "অগ্রিম জমা" হিসেবে থাকবে এবং পরবর্তী কেনাকাটায় সমন্বয় হবে।
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-slate-50 rounded-lg text-xs flex justify-between">
+                  <span>পরিশোধের পর অবশিষ্ট বাকি:</span>
+                  <strong className="text-rose-600">
+                    ৳{Math.max(0, paymentModalCustomer.totalDue - paymentAmount)}
+                  </strong>
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
@@ -1704,6 +2090,34 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
           </div>
         </div>
       )}
+
+      {/* COURIER BATCH REMITTANCE MODAL (কুরিয়ার বাল্ক বিল এন্ট্রি) */}
+      <CourierBatchRemittanceModal
+        isOpen={isBatchRemittanceModalOpen}
+        onClose={() => {
+          setIsBatchRemittanceModalOpen(false);
+          setSelectedParcelIds([]);
+        }}
+        orders={orders}
+        settings={settings}
+        initialSelectedOrderIds={selectedParcelIds}
+        onSettleBatch={(batch, createInwardExpense) => {
+          if (onSettleBatchRemittance) {
+            onSettleBatchRemittance(batch, createInwardExpense);
+          }
+          setIsBatchRemittanceModalOpen(false);
+          setSelectedParcelIds([]);
+          setViewingBatch(batch);
+        }}
+      />
+
+      {/* COURIER REMITTANCE BATCH VIEW / PRINT MODAL */}
+      <CourierRemittanceBatchViewModal
+        isOpen={!!viewingBatch}
+        onClose={() => setViewingBatch(null)}
+        batch={viewingBatch}
+        settings={settings}
+      />
     </div>
   );
 };

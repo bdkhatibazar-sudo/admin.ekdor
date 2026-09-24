@@ -22,9 +22,10 @@ export interface Customer {
   phone: string;              // ১ম নম্বর: বুকিং / কল নম্বর
   whatsappPhone?: string;     // ২য় নম্বর: হোয়াটসঅ্যাপ নম্বর (না থাকলে ১ম নম্বরই প্রযোজ্য)
   address?: string;
-  totalDue: number;       // বর্তমান বাকি
-  totalPurchased: number; // মোট কেনাকাটা
-  totalPaid: number;      // মোট পরিশোধিত
+  totalDue: number;           // বর্তমান বাকি
+  advanceBalance?: number;    // অতিরিক্ত জমা / অগ্রিম ব্যালেন্স (পরবর্তী কেনাকাটায় সমন্বয় হবে)
+  totalPurchased: number;     // মোট কেনাকাটা
+  totalPaid: number;          // মোট পরিশোধিত
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +83,8 @@ export interface Order {
   paidAmount: number;    // অগ্রিম বা মোট পরিশোধ
   dueAmount: number;     // কাস্টমারের বাকি (দোকান বিক্রির ক্ষেত্রে)
   codAmount: number;     // কুরিয়ার ক্যাশ অন ডেলিভারি কালেকশন টাকা
+  appliedAdvance?: number; // গ্রাহকের পূর্বের অতিরিক্ত জমা থেকে সমন্বয়কৃত টাকা
+  excessAdvanceAdded?: number; // অতিরিক্ত পরিশোধের ফলে গ্রাহকের জমা অ্যাকাউন্টে যোগ হওয়া টাকা
   paymentMethod: PaymentMethod;
   courierName?: string;
   courierTrackingCode?: string; // কনসাইনমেন্ট আইডি বা ট্র্যাকিং কোড
@@ -148,6 +151,7 @@ export interface DuePaymentRecord {
   paymentMethod: 'cash' | 'qr' | 'bkash' | 'bank';
   date: string;
   note?: string;
+  isAdvanceDeposit?: boolean; // অতিরিক্ত বা অগ্রিম জমা
 }
 
 // মহাজনের বাকি পরিশোধের রেকর্ড
@@ -269,8 +273,10 @@ export type ActiveTab =
   | 'orders'         // পুরাতন অর্ডার ও এডিট
   | 'stock'          // স্টক ও ইনভেন্টরি
   | 'purchases'      // মাল ক্রয় ও মহাজনের বাকি
-  | 'customers'      // গ্রাহক ও বাকি খাতা
+  | 'due_khata'      // বাকীর খাতা (কাস্টমারের বাকি ও কুরিয়ার সিওডি)
+  | 'customers'      // গ্রাহক (সকল গ্রাহক, প্রোফাইল, হিস্ট্রি, অর্ডার লিস্ট)
   | 'profit_loss'    // লাভ-ক্ষতির রিপোর্ট
   | 'expenses'       // দোকান খরচ (ভাড়া, বেতন)
   | 'backup_sync'    // ব্যাকআপ, সেটিংস ও Supabase
-  | 'receipt_view';  // এ৫ রসিদ প্রিন্ট ভিউ
+  | 'receipt_view'   // এ৫ রসিদ প্রিন্ট ভিউ
+  | 'sale_success';  // বিক্রি সফল তথ্য সারাংশ ও ইনভয়েস শেয়ার/এডিট
