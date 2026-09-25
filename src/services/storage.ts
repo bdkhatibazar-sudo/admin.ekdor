@@ -1,4 +1,4 @@
-import { AppStateData, Product, Customer, Order, DuePaymentRecord, SupplierDuePayment, CashAdjustment, Expense, PurchaseRecord, StoreSettings } from '../types';
+import { AppStateData, Product, ProductBundle, Customer, Order, DuePaymentRecord, SupplierDuePayment, CashAdjustment, Expense, PurchaseRecord, StoreSettings } from '../types';
 
 const STORAGE_KEY = 'dokan_khata_pos_data_v2';
 const LEGACY_STORAGE_KEY = 'dokan_khata_pos_data_v1';
@@ -204,6 +204,91 @@ const initialProducts: Product[] = [
     stockQty: 35,
     minStockAlert: 10,
     unit: 'ডজন',
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'prod-hijama-pen',
+    name: 'হিজামা পেন',
+    banglaName: 'প্রফেশনাল হিজামা ল্যান্সিং পেন',
+    category: 'হিজামা সামগ্রী',
+    barcode: '89412001',
+    purchasePrice: 190,
+    sellingPrice: 290,
+    stockQty: 40,
+    minStockAlert: 5,
+    unit: 'পিস',
+    defaultDeliveryCharge: 130,
+    weightKg: 0.1,
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'prod-needle-box',
+    name: 'নিডেল বক্স',
+    banglaName: 'হিজামা ডিসপোজেবল নিডেল (১০০ পিস বক্স)',
+    category: 'হিজামা সামগ্রী',
+    barcode: '89412002',
+    purchasePrice: 65,
+    sellingPrice: 110,
+    stockQty: 50,
+    minStockAlert: 10,
+    unit: 'বক্স',
+    defaultDeliveryCharge: 130,
+    weightKg: 0.15,
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'prod-hijama-32cup',
+    name: 'হিজামা ৩২ কাপ সেট',
+    banglaName: 'প্রিমিয়াম কোয়ালিটি ৩২ কাপ হিজামা কিট',
+    category: 'হিজামা সামগ্রী',
+    barcode: '89412003',
+    purchasePrice: 1050,
+    sellingPrice: 1430,
+    stockQty: 20,
+    minStockAlert: 4,
+    unit: 'পিস',
+    defaultDeliveryCharge: 130,
+    weightKg: 1.2,
+    updatedAt: new Date().toISOString(),
+  }
+];
+
+export const initialBundles: ProductBundle[] = [
+  {
+    id: 'bundle-hijama-32-full',
+    name: 'হিজামা ৩২ কাপ ফুল সেট',
+    category: 'হিজামা সামগ্রী',
+    description: 'হিজামা ৩২ কাপ সেট + হিজামা পেন + নিডেল বক্স কম্বো প্যাকেজ',
+    bundlePrice: 1790,
+    defaultDeliveryCharge: 130,
+    weightKg: 1.45,
+    items: [
+      {
+        productId: 'prod-hijama-pen',
+        productName: 'হিজামা পেন',
+        originalSellingPrice: 290,
+        bundleSellingPrice: 280,
+        quantity: 1,
+        unit: 'পিস',
+      },
+      {
+        productId: 'prod-needle-box',
+        productName: 'নিডেল বক্স',
+        originalSellingPrice: 110,
+        bundleSellingPrice: 100,
+        quantity: 1,
+        unit: 'বক্স',
+      },
+      {
+        productId: 'prod-hijama-32cup',
+        productName: 'হিজামা ৩২ কাপ সেট',
+        originalSellingPrice: 1430,
+        bundleSellingPrice: 1410,
+        quantity: 1,
+        unit: 'পিস',
+      },
+    ],
+    createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
 ];
@@ -435,6 +520,7 @@ export const loadAppState = (): AppStateData => {
     if (!raw) {
       const defaultState: AppStateData = {
         products: initialProducts,
+        bundles: initialBundles,
         customers: initialCustomers,
         orders: initialOrders,
         duePayments: initialDuePayments,
@@ -457,6 +543,19 @@ export const loadAppState = (): AppStateData => {
       courierSecretKey: (parsed.settings?.courierSecretKey || '').trim() || defaultSettings.courierSecretKey,
     };
 
+    // Ensure initial Hijama products exist in products list
+    let existingProducts: Product[] = parsed.products || initialProducts;
+    const existingIds = new Set(existingProducts.map(p => p.id));
+    const missingInitialProducts = initialProducts.filter(p => !existingIds.has(p.id));
+    if (missingInitialProducts.length > 0) {
+      existingProducts = [...existingProducts, ...missingInitialProducts];
+    }
+
+    const loadedBundles: ProductBundle[] = 
+      parsed.bundles && parsed.bundles.length > 0 
+        ? parsed.bundles 
+        : initialBundles;
+
     const loadedOrders: Order[] = (parsed.orders || initialOrders).map((o: any) => ({
       ...o,
       orderType: o.orderType || 'store',
@@ -471,7 +570,8 @@ export const loadAppState = (): AppStateData => {
     }));
 
     return {
-      products: parsed.products || initialProducts,
+      products: existingProducts,
+      bundles: loadedBundles,
       customers: parsed.customers || initialCustomers,
       orders: loadedOrders,
       duePayments: (parsed.duePayments || initialDuePayments).map((p: any) => ({
@@ -499,6 +599,7 @@ export const loadAppState = (): AppStateData => {
     console.error('Error loading app state from localStorage:', err);
     return {
       products: initialProducts,
+      bundles: initialBundles,
       customers: initialCustomers,
       orders: initialOrders,
       duePayments: initialDuePayments,
@@ -562,6 +663,7 @@ export const importDataBackup = (file: File): Promise<AppStateData> => {
         }
         const state: AppStateData = {
           products: parsed.products || [],
+          bundles: Array.isArray(parsed.bundles) && parsed.bundles.length > 0 ? parsed.bundles : (parsed.bundles || initialBundles),
           customers: parsed.customers || [],
           orders: parsed.orders || [],
           duePayments: parsed.duePayments || [],
@@ -589,6 +691,7 @@ export const importDataBackup = (file: File): Promise<AppStateData> => {
 export const resetToDemoData = (): AppStateData => {
   const demoState: AppStateData = {
     products: initialProducts,
+    bundles: initialBundles,
     customers: initialCustomers,
     orders: initialOrders,
     duePayments: initialDuePayments,

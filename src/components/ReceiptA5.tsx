@@ -552,7 +552,14 @@ ${settings.invoiceFooter || 'অর্ডার করা খুবই সহজ
                 {order.items.map((item, index) => (
                   <tr key={item.productId || index}>
                     <td style={{ textAlign: 'center' }}>{toBanglaNumber(index + 1)}</td>
-                    <td>{item.productName}</td>
+                    <td>
+                      {item.productName}
+                      {item.bundleName && (
+                        <span style={{ fontSize: '10px', color: '#0d9488', marginLeft: '6px', fontWeight: 'bold' }}>
+                          [{item.bundleName}]
+                        </span>
+                      )}
+                    </td>
                     <td style={{ textAlign: 'center' }}>{toBanglaNumber(item.quantity)}</td>
                     <td style={{ textAlign: 'center' }}>{toBanglaNumber(item.unitPrice)}</td>
                     <td style={{ textAlign: 'right' }}>{toBanglaNumber(item.total)}</td>

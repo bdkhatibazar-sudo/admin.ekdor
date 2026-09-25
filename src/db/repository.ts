@@ -154,11 +154,13 @@ export async function getStoreData(userId: string): Promise<Partial<AppStateData
       reason: a.reason,
     }));
 
-    const savedSettings = dbSettingsList[0]?.settings as StoreSettings | undefined;
+    const savedSettings = dbSettingsList[0]?.settings as any | undefined;
     const lastCashCount = dbSettingsList[0]?.lastCashCount as any | undefined;
+    const loadedBundles = savedSettings?.bundles || [];
 
     return {
       products: formattedProducts,
+      bundles: loadedBundles,
       customers: formattedCustomers,
       orders: formattedOrders,
       purchases: formattedPurchases,
@@ -177,18 +179,22 @@ export async function getStoreData(userId: string): Promise<Partial<AppStateData
 
 export async function syncStoreData(userId: string, data: AppStateData) {
   try {
-    // 1. Sync Settings & Last Cash Count
+    // 1. Sync Settings & Last Cash Count & Bundles
     if (data.settings) {
+      const settingsPayload = {
+        ...data.settings,
+        bundles: data.bundles || [],
+      };
       await db.insert(storeSettings)
         .values({
           userId,
-          settings: data.settings,
+          settings: settingsPayload,
           lastCashCount: data.lastCashCount || null,
         })
         .onConflictDoUpdate({
           target: storeSettings.userId,
           set: {
-            settings: data.settings,
+            settings: settingsPayload,
             lastCashCount: data.lastCashCount || null,
             updatedAt: new Date(),
           },

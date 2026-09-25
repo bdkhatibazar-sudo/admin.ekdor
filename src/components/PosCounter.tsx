@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Product, Customer, Order, OrderItem, PaymentMethod, OrderType, OrderStatus } from '../types';
+import { Product, ProductBundle, Customer, Order, OrderItem, PaymentMethod, OrderType, OrderStatus } from '../types';
 import { formatCurrency, generateInvoiceNumber, resolveWhatsAppNumber, createWhatsAppUrl } from '../utils/formatters';
 import { MoneyInput } from './MoneyInput';
 import { 
@@ -33,11 +33,13 @@ import {
   Building2,
   Gift,
   Sparkles,
-  Edit3
+  Edit3,
+  Layers
 } from 'lucide-react';
 
 interface PosCounterProps {
   products: Product[];
+  bundles?: ProductBundle[];
   customers: Customer[];
   initialCustomerId?: string | null;
   onClearInitialCustomerId?: () => void;
@@ -46,10 +48,12 @@ interface PosCounterProps {
   onCompleteSale: (order: Order) => void;
   onUpdateOrder?: (updatedOrder: Order, originalOrder: Order) => void;
   onQuickAddCustomer: (customer: Customer) => void;
+  onOpenBundleManagement?: () => void;
 }
 
 export const PosCounter: React.FC<PosCounterProps> = ({
   products,
+  bundles = [],
   customers,
   initialCustomerId,
   onClearInitialCustomerId,
@@ -58,6 +62,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
   onCompleteSale,
   onUpdateOrder,
   onQuickAddCustomer,
+  onOpenBundleManagement,
 }) => {
   // Sales mode: Store vs Online
   const [orderType, setOrderType] = useState<OrderType>('store');
@@ -192,6 +197,43 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     });
   }, [products, selectedCategory, searchTerm]);
 
+  // Helper: calculate available stock for a bundle
+  const getBundleStockInfo = (bundle: ProductBundle) => {
+    if (!bundle.items || bundle.items.length === 0) return { count: 0, bottleneck: null };
+    let minSets = Infinity;
+    let bottleneck: { name: string; stock: number; required: number } | null = null;
+    for (const item of bundle.items) {
+      const prod = products.find((p) => p.id === item.productId);
+      const stock = prod ? prod.stockQty : 0;
+      const sets = item.quantity > 0 ? Math.floor(stock / item.quantity) : 0;
+      if (sets < minSets) {
+        minSets = sets;
+        bottleneck = {
+          name: item.productName,
+          stock,
+          required: item.quantity,
+        };
+      }
+    }
+    return {
+      count: minSets === Infinity ? 0 : Math.max(0, minSets),
+      bottleneck,
+    };
+  };
+
+  // Filtered Bundles for POS
+  const filteredBundles = useMemo(() => {
+    const list = bundles || [];
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return list;
+    return list.filter((b) =>
+      b.name.toLowerCase().includes(q) ||
+      (b.category && b.category.toLowerCase().includes(q)) ||
+      (b.description && b.description.toLowerCase().includes(q)) ||
+      b.items.some((it) => it.productName.toLowerCase().includes(q))
+    );
+  }, [bundles, searchTerm]);
+
   // Calculations
   const subtotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.total, 0);
@@ -258,7 +300,7 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     return Math.max(0, (paidAmount || 0) - netPayable);
   }, [paidAmount, netPayable]);
 
-  // Cart operations
+  // Cart operations - Single Product
   const addToCart = (product: Product) => {
     if (product.stockQty <= 0) {
       alert('সতর্কতা: পণ্যটির স্টক শেষ হয়ে গেছে!');
@@ -273,14 +315,24 @@ export const PosCounter: React.FC<PosCounterProps> = ({
       const origItem = editingOrder?.items.find((i) => i.productId === product.id);
       const availableStock = product.stockQty + (origItem ? origItem.quantity : 0);
 
-      const existing = prev.find((item) => item.productId === product.id);
-      if (existing) {
-        if (existing.quantity >= availableStock) {
-          alert(`সর্বোচ্চ উপলব্ধ মোট স্টক: ${availableStock} ${product.unit}`);
-          return prev;
-        }
-        return prev.map((item) =>
-          item.productId === product.id
+      // Check current in-cart total quantity for this product across all items
+      const currentInCartQty = prev
+        .filter((item) => item.productId === product.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+
+      if (currentInCartQty >= availableStock) {
+        alert(`সর্বোচ্চ উপলব্ধ মোট স্টক: ${availableStock} ${product.unit}`);
+        return prev;
+      }
+
+      // Check if standalone item already in cart (not part of a bundle)
+      const existingStandaloneIndex = prev.findIndex(
+        (item) => item.productId === product.id && !item.bundleId
+      );
+
+      if (existingStandaloneIndex >= 0) {
+        return prev.map((item, idx) =>
+          idx === existingStandaloneIndex
             ? {
                 ...item,
                 quantity: item.quantity + 1,
@@ -303,22 +355,90 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     });
   };
 
-  const updateQuantity = (productId: string, newQty: number) => {
+  // Add a Bundle to Cart - "ক্লিক করবো একটি কিন্তু পণ্য যুক্ত হবে একাধিক।"
+  const addBundleToCart = (bundle: ProductBundle) => {
+    // 1. Stock check for all items in bundle
+    for (const bItem of bundle.items) {
+      const prod = products.find((p) => p.id === bItem.productId);
+      const inCartQty = cart
+        .filter((c) => c.productId === bItem.productId)
+        .reduce((sum, c) => sum + c.quantity, 0);
+      const availableStock = prod ? prod.stockQty : 0;
+
+      if (inCartQty + bItem.quantity > availableStock) {
+        alert(
+          `সতর্কতা: '${bundle.name}' বান্ডেলটি যুক্ত করার মতো পর্যাপ্ত স্টক নেই!\n'${bItem.productName}'-এর বর্তমান মোট স্টক আছে ${availableStock} ${bItem.unit}, কার্টে আগেই যোগ করা আছে ${inCartQty} ${bItem.unit}।`
+        );
+        return;
+      }
+    }
+
+    if (cart.length === 0 && bundle.defaultDeliveryCharge && bundle.defaultDeliveryCharge > 0) {
+      setDeliveryCharge(bundle.defaultDeliveryCharge);
+    }
+
+    setCart((prev) => {
+      let next = [...prev];
+      bundle.items.forEach((bItem) => {
+        const prod = products.find((p) => p.id === bItem.productId);
+        const purchasePrice = prod ? prod.purchasePrice : 0;
+
+        // Check if item belonging to this specific bundle already exists in cart
+        const existingIndex = next.findIndex(
+          (item) => item.productId === bItem.productId && item.bundleId === bundle.id
+        );
+
+        if (existingIndex >= 0) {
+          const ex = next[existingIndex];
+          const newQty = ex.quantity + bItem.quantity;
+          next[existingIndex] = {
+            ...ex,
+            quantity: newQty,
+            total: Math.round(newQty * ex.unitPrice),
+          };
+        } else {
+          const newItem: OrderItem = {
+            productId: bItem.productId,
+            productName: bItem.productName, // uses bundle custom name
+            quantity: bItem.quantity,
+            unit: bItem.unit,
+            unitPrice: bItem.bundleSellingPrice, // uses bundle custom price
+            purchasePrice,
+            total: Math.round(bItem.bundleSellingPrice * bItem.quantity),
+            bundleId: bundle.id,
+            bundleName: bundle.name,
+          };
+          next.push(newItem);
+        }
+      });
+      return next;
+    });
+  };
+
+  const updateQuantity = (index: number, newQty: number) => {
     if (newQty <= 0) {
-      removeFromCart(productId);
+      removeFromCart(index);
       return;
     }
-    const product = products.find((p) => p.id === productId);
-    const origItem = editingOrder?.items.find((i) => i.productId === productId);
+    const targetItem = cart[index];
+    if (!targetItem) return;
+
+    const product = products.find((p) => p.id === targetItem.productId);
+    const origItem = editingOrder?.items.find((i) => i.productId === targetItem.productId);
     const availableStock = product ? product.stockQty + (origItem ? origItem.quantity : 0) : 999999;
 
-    if (product && newQty > availableStock) {
+    const otherInCartQty = cart
+      .filter((_, idx) => idx !== index && cart[idx].productId === targetItem.productId)
+      .reduce((sum, it) => sum + it.quantity, 0);
+
+    if (product && newQty + otherInCartQty > availableStock) {
       alert(`উপলব্ধ মোট স্টক মাত্র ${availableStock} ${product.unit}`);
       return;
     }
+
     setCart((prev) =>
-      prev.map((item) =>
-        item.productId === productId
+      prev.map((item, idx) =>
+        idx === index
           ? {
               ...item,
               quantity: newQty,
@@ -329,11 +449,11 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     );
   };
 
-  const updateUnitPrice = (productId: string, newPrice: number) => {
+  const updateUnitPrice = (index: number, newPrice: number) => {
     const validPrice = Math.max(0, isNaN(newPrice) ? 0 : newPrice);
     setCart((prev) =>
-      prev.map((item) =>
-        item.productId === productId
+      prev.map((item, idx) =>
+        idx === index
           ? {
               ...item,
               unitPrice: validPrice,
@@ -344,8 +464,8 @@ export const PosCounter: React.FC<PosCounterProps> = ({
     );
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item.productId !== productId));
+  const removeFromCart = (index: number) => {
+    setCart((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const clearCart = () => {
@@ -686,99 +806,244 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
 
           {/* Categories Pill Selector */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  selectedCategory === cat
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {cat === 'all' ? 'সব পণ্য' : cat}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                selectedCategory === 'all'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              সব একক পণ্য
+            </button>
+
+            <button
+              type="button"
+              id="pos-filter-bundles-btn"
+              onClick={() => setSelectedCategory('bundles')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                selectedCategory === 'bundles'
+                  ? 'bg-teal-700 text-white shadow-xs'
+                  : 'bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>🎁 বান্ডেল / কম্বো ({(bundles || []).length})</span>
+            </button>
+
+            {categories
+              .filter((c) => c !== 'all')
+              .map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    selectedCategory === cat
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
           </div>
         </div>
 
-        {/* Product Cards Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
-          {filteredProducts.length === 0 ? (
-            <div className="col-span-full py-16 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
-              <Search className="w-8 h-8 mx-auto text-slate-300 mb-2 opacity-60" />
-              <p className="font-semibold text-slate-700 text-sm">কোনো পণ্য পাওয়া যায়নি</p>
-              <p className="text-xs text-slate-400 mt-1">অন্য কোনো নাম দিয়ে সার্চ করুন বা স্টকে নতুন পণ্য যোগ করুন</p>
-            </div>
-          ) : (
-            filteredProducts.map((product) => {
-              const inCartItem = cart.find((i) => i.productId === product.id);
-              const isLowStock = product.stockQty <= product.minStockAlert;
-              const isOutOfStock = product.stockQty <= 0;
+        {/* Product or Bundle Cards Grid */}
+        {selectedCategory === 'bundles' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
+            {filteredBundles.length === 0 ? (
+              <div className="col-span-full py-16 text-center text-slate-400 bg-white rounded-xl border border-slate-200 space-y-2">
+                <Layers className="w-8 h-8 mx-auto text-teal-500 opacity-60" />
+                <p className="font-semibold text-slate-700 text-sm">কোনো বান্ডেল প্যাকেজ পাওয়া যায়নি</p>
+                <p className="text-xs text-slate-400">
+                  {searchTerm ? 'অন্য কোনো নাম দিয়ে সার্চ করুন' : 'স্টক মেনু থেকে নতুন বান্ডেল তৈরি করুন'}
+                </p>
+              </div>
+            ) : (
+              filteredBundles.map((bundle) => {
+                const stockInfo = getBundleStockInfo(bundle);
+                const isOutOfStock = stockInfo.count <= 0;
+                const regularTotal = bundle.items.reduce(
+                  (sum, it) => sum + (it.originalSellingPrice || 0) * (it.quantity || 1),
+                  0
+                );
+                const savings = Math.max(0, regularTotal - bundle.bundlePrice);
 
-              return (
-                <div
-                  key={product.id}
-                  id={`product-card-${product.id}`}
-                  onClick={() => !isOutOfStock && addToCart(product)}
-                  className={`bg-white rounded-xl p-3 border transition-all cursor-pointer select-none flex flex-col justify-between relative group ${
-                    isOutOfStock
-                      ? 'opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed'
-                      : inCartItem
-                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                      : 'border-slate-200 hover:border-emerald-400 hover:shadow-xs'
-                  }`}
-                >
-                  {/* In-cart badge */}
-                  {inCartItem && (
-                    <span className="absolute -top-2 -right-2 bg-emerald-600 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-xs">
-                      {inCartItem.quantity}
-                    </span>
-                  )}
+                // In-cart bundle counter
+                const inCartSets = Math.min(
+                  ...bundle.items.map((it) => {
+                    const inCart = cart.find(
+                      (c) => c.productId === it.productId && c.bundleId === bundle.id
+                    );
+                    return inCart ? Math.floor(inCart.quantity / it.quantity) : 0;
+                  })
+                );
 
-                  <div>
-                    <div className="flex items-start justify-between gap-1 mb-1">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">
-                        {product.category}
+                return (
+                  <div
+                    key={bundle.id}
+                    onClick={() => !isOutOfStock && addBundleToCart(bundle)}
+                    className={`bg-white rounded-xl p-3.5 border transition-all cursor-pointer select-none flex flex-col justify-between relative group ${
+                      isOutOfStock
+                        ? 'opacity-60 border-slate-200 bg-slate-50 cursor-not-allowed'
+                        : inCartSets > 0
+                        ? 'border-teal-500 ring-2 ring-teal-500/20 shadow-xs'
+                        : 'border-teal-200/90 hover:border-teal-500 hover:shadow-md'
+                    }`}
+                  >
+                    {inCartSets > 0 && (
+                      <span className="absolute -top-2 -right-2 bg-teal-700 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-xs">
+                        {inCartSets}
                       </span>
-                      {isOutOfStock ? (
-                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
-                          স্টক শেষ
-                        </span>
-                      ) : isLowStock ? (
-                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                          {product.stockQty} বাকি
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-slate-400">
-                          স্টক: {product.stockQty} {product.unit}
-                        </span>
-                      )}
-                    </div>
+                    )}
 
-                    <h4 className="font-bold text-slate-800 text-xs sm:text-sm line-clamp-2 leading-snug">
-                      {product.banglaName || product.name}
-                    </h4>
-                  </div>
-
-                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 block leading-none">বিক্রয়মূল্য</span>
-                      <span className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
-                        ৳{product.sellingPrice}
-                      </span>
+                      <div className="flex items-start justify-between gap-1 mb-1.5">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800">
+                          🎁 {bundle.category || 'বান্ডেল'}
+                        </span>
+                        {isOutOfStock ? (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                            স্টক নেই
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                            স্টক: {stockInfo.count} সেট
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="font-bold text-slate-900 text-sm leading-snug">
+                        {bundle.name}
+                      </h4>
+
+                      {/* Included Items Preview */}
+                      <div className="mt-2 space-y-1">
+                        {bundle.items.map((it, idx) => (
+                          <div
+                            key={it.productId || idx}
+                            className="text-[11px] text-slate-600 flex items-center justify-between bg-slate-50 px-2 py-1 rounded"
+                          >
+                            <span className="truncate">
+                              • {it.productName} ({it.quantity} {it.unit})
+                            </span>
+                            <span className="font-semibold text-teal-800 shrink-0">
+                              ৳{it.bundleSellingPrice}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
-                    <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                      <Plus className="w-4 h-4" />
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-base font-black text-teal-800">
+                            ৳{bundle.bundlePrice}
+                          </span>
+                          {regularTotal > bundle.bundlePrice && (
+                            <span className="text-xs text-slate-400 line-through">
+                              ৳{regularTotal}
+                            </span>
+                          )}
+                        </div>
+                        {savings > 0 && (
+                          <span className="text-[10px] text-indigo-700 font-bold block">
+                            সাশ্রয়: ৳{savings}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 px-2.5 py-1.5 bg-teal-600 text-white rounded-lg text-xs font-bold group-hover:bg-teal-700 transition-colors shadow-2xs">
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>১-ক্লিকে যোগ</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+                );
+              })
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
+            {filteredProducts.length === 0 ? (
+              <div className="col-span-full py-16 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+                <Search className="w-8 h-8 mx-auto text-slate-300 mb-2 opacity-60" />
+                <p className="font-semibold text-slate-700 text-sm">কোনো পণ্য পাওয়া যায়নি</p>
+                <p className="text-xs text-slate-400 mt-1">অন্য কোনো নাম দিয়ে সার্চ করুন বা স্টকে নতুন পণ্য যোগ করুন</p>
+              </div>
+            ) : (
+              filteredProducts.map((product) => {
+                const inCartItem = cart.find((i) => i.productId === product.id && !i.bundleId);
+                const isLowStock = product.stockQty <= product.minStockAlert;
+                const isOutOfStock = product.stockQty <= 0;
+
+                return (
+                  <div
+                    key={product.id}
+                    id={`product-card-${product.id}`}
+                    onClick={() => !isOutOfStock && addToCart(product)}
+                    className={`bg-white rounded-xl p-3 border transition-all cursor-pointer select-none flex flex-col justify-between relative group ${
+                      isOutOfStock
+                        ? 'opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed'
+                        : inCartItem
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'border-slate-200 hover:border-emerald-400 hover:shadow-xs'
+                    }`}
+                  >
+                    {/* In-cart badge */}
+                    {inCartItem && (
+                      <span className="absolute -top-2 -right-2 bg-emerald-600 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-xs">
+                        {inCartItem.quantity}
+                      </span>
+                    )}
+
+                    <div>
+                      <div className="flex items-start justify-between gap-1 mb-1">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">
+                          {product.category}
+                        </span>
+                        {isOutOfStock ? (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                            স্টক শেষ
+                          </span>
+                        ) : isLowStock ? (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                            {product.stockQty} বাকি
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold text-slate-400">
+                            স্টক: {product.stockQty} {product.unit}
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="font-bold text-slate-800 text-xs sm:text-sm line-clamp-2 leading-snug">
+                        {product.banglaName || product.name}
+                      </h4>
+                    </div>
+
+                    <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block leading-none">বিক্রয়মূল্য</span>
+                        <span className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                          ৳{product.sellingPrice}
+                        </span>
+                      </div>
+
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <Plus className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* RIGHT COLUMN: POS Cart & Checkout Invoice (Span 5 or 4) */}
@@ -1242,17 +1507,27 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                 <p className="text-[11px] text-slate-400 mt-0.5">বামপাশের তালিকা থেকে পণ্য ক্লিক করুন</p>
               </div>
             ) : (
-              cart.map((item) => (
-                <div key={item.productId} className="pt-2 flex items-center justify-between gap-2 text-xs">
+              cart.map((item, index) => (
+                <div
+                  key={`${item.productId}-${item.bundleId || 'single'}-${index}`}
+                  className="pt-2 flex items-center justify-between gap-2 text-xs"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
+                      {item.bundleName && (
+                        <span className="text-[10px] bg-teal-100 text-teal-800 px-1.5 py-0.2 rounded font-bold shrink-0">
+                          🎁 {item.bundleName}
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 text-slate-500 text-[11px] mt-0.5">
                       <span>দর: ৳</span>
                       <input
                         type="number"
                         min="0"
                         value={item.unitPrice}
-                        onChange={(e) => updateUnitPrice(item.productId, Number(e.target.value))}
+                        onChange={(e) => updateUnitPrice(index, Number(e.target.value))}
                         className="w-14 px-1 py-0.5 text-xs font-semibold bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
                         title="একক বিক্রয় দর পরিবর্তন করুন"
                       />
@@ -1264,7 +1539,7 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                   <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                      onClick={() => updateQuantity(index, item.quantity - 1)}
                       className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer"
                       title="পরিমাণ কমান"
                     >
@@ -1274,13 +1549,13 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
                       type="number"
                       min="1"
                       value={item.quantity}
-                      onChange={(e) => updateQuantity(item.productId, Math.max(1, parseInt(e.target.value) || 1))}
+                      onChange={(e) => updateQuantity(index, Math.max(1, parseInt(e.target.value) || 1))}
                       className="w-8 text-center font-bold text-slate-800 text-xs bg-transparent border-0 focus:outline-hidden"
                       title="পরিমাণ লিখুন"
                     />
                     <button
                       type="button"
-                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                      onClick={() => updateQuantity(index, item.quantity + 1)}
                       className="p-1 rounded text-slate-600 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer"
                       title="পরিমাণ বাড়ান"
                     >
@@ -1294,8 +1569,8 @@ ${paidAmount > 0 ? `অগ্রিম জমা: ৳${paidAmount}\n` : ''}${ord
 
                   <button
                     type="button"
-                    onClick={() => removeFromCart(item.productId)}
-                    className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
+                    onClick={() => removeFromCart(index)}
+                    className="text-slate-400 hover:text-rose-600 p-1 transition-colors cursor-pointer"
                     title="মুছে ফেলুন"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

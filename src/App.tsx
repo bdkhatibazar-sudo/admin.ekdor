@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   AppStateData, 
   Product, 
+  ProductBundle,
   Customer, 
   Order, 
   OrderStatus,
@@ -217,11 +218,13 @@ export default function App() {
       let updatedProducts = prev.products;
       if (order.status !== 'draft') {
         updatedProducts = prev.products.map((prod) => {
-          const itemSold = order.items.find((it) => it.productId === prod.id);
-          if (itemSold) {
+          const totalSold = order.items
+            .filter((it) => it.productId === prod.id)
+            .reduce((sum, it) => sum + it.quantity, 0);
+          if (totalSold > 0) {
             return {
               ...prod,
-              stockQty: Math.max(0, prod.stockQty - itemSold.quantity),
+              stockQty: Math.max(0, prod.stockQty - totalSold),
               updatedAt: new Date().toISOString(),
             };
           }
@@ -309,11 +312,13 @@ export default function App() {
       // Deduct stock if transitioning from inactive to active
       if (isInactiveStatus(prevStatus) && isActiveStatus(newStatus)) {
         updatedProducts = prev.products.map((prod) => {
-          const itemSold = targetOrder.items.find((i) => i.productId === prod.id);
-          if (itemSold) {
+          const totalSold = targetOrder.items
+            .filter((i) => i.productId === prod.id)
+            .reduce((sum, i) => sum + i.quantity, 0);
+          if (totalSold > 0) {
             return {
               ...prod,
-              stockQty: Math.max(0, prod.stockQty - itemSold.quantity),
+              stockQty: Math.max(0, prod.stockQty - totalSold),
               updatedAt: new Date().toISOString(),
             };
           }
@@ -324,11 +329,13 @@ export default function App() {
       // Restore stock if transitioning from active to inactive
       if (isActiveStatus(prevStatus) && isInactiveStatus(newStatus)) {
         updatedProducts = prev.products.map((prod) => {
-          const itemSold = targetOrder.items.find((i) => i.productId === prod.id);
-          if (itemSold) {
+          const totalSold = targetOrder.items
+            .filter((i) => i.productId === prod.id)
+            .reduce((sum, i) => sum + i.quantity, 0);
+          if (totalSold > 0) {
             return {
               ...prod,
-              stockQty: prod.stockQty + itemSold.quantity,
+              stockQty: prod.stockQty + totalSold,
               updatedAt: new Date().toISOString(),
             };
           }
@@ -390,10 +397,16 @@ export default function App() {
 
       // 1. Calculate stock difference
       const updatedProducts = prev.products.map((prod) => {
-        const origItem = originalOrder.items.find((i) => i.productId === prod.id);
-        const newItem = updatedOrder.items.find((i) => i.productId === prod.id);
-        const origQty = origIsActive && origItem ? origItem.quantity : 0;
-        const newQty = newIsActive && newItem ? newItem.quantity : 0;
+        const origQty = origIsActive
+          ? originalOrder.items
+              .filter((i) => i.productId === prod.id)
+              .reduce((sum, i) => sum + i.quantity, 0)
+          : 0;
+        const newQty = newIsActive
+          ? updatedOrder.items
+              .filter((i) => i.productId === prod.id)
+              .reduce((sum, i) => sum + i.quantity, 0)
+          : 0;
         const stockDiff = origQty - newQty; // positive means stock returned
 
         if (stockDiff !== 0) {
@@ -711,6 +724,28 @@ export default function App() {
     updateStateAndPersist((prev) => ({
       ...prev,
       products: prev.products.filter((p) => p.id !== productId),
+    }));
+  };
+
+  // Bundle Operations (বান্ডেল ও কম্বো প্যাকেজ অপারেশন)
+  const handleAddBundle = (bundle: ProductBundle) => {
+    updateStateAndPersist((prev) => ({
+      ...prev,
+      bundles: [bundle, ...(prev.bundles || [])],
+    }));
+  };
+
+  const handleUpdateBundle = (bundle: ProductBundle) => {
+    updateStateAndPersist((prev) => ({
+      ...prev,
+      bundles: (prev.bundles || []).map((b) => (b.id === bundle.id ? bundle : b)),
+    }));
+  };
+
+  const handleDeleteBundle = (bundleId: string) => {
+    updateStateAndPersist((prev) => ({
+      ...prev,
+      bundles: (prev.bundles || []).filter((b) => b.id !== bundleId),
     }));
   };
 
@@ -1198,6 +1233,7 @@ export default function App() {
         {activeTab === 'pos' && (
           <PosCounter
             products={appState.products}
+            bundles={appState.bundles || []}
             customers={appState.customers}
             initialCustomerId={posPreselectedCustomerId}
             onClearInitialCustomerId={() => setPosPreselectedCustomerId(null)}
@@ -1215,6 +1251,7 @@ export default function App() {
               handleUpdateOrder(updatedOrder, originalOrder);
             }}
             onQuickAddCustomer={handleAddCustomer}
+            onOpenBundleManagement={() => setActiveTab('stock')}
           />
         )}
 
@@ -1252,9 +1289,13 @@ export default function App() {
         {activeTab === 'stock' && (
           <StockManagement
             products={appState.products}
+            bundles={appState.bundles || []}
             onAddProduct={handleAddProduct}
             onUpdateProduct={handleUpdateProduct}
             onDeleteProduct={handleDeleteProduct}
+            onAddBundle={handleAddBundle}
+            onUpdateBundle={handleUpdateBundle}
+            onDeleteBundle={handleDeleteBundle}
           />
         )}
 

@@ -31,6 +31,28 @@ export interface Customer {
   updatedAt: string;
 }
 
+export interface BundleItem {
+  productId: string;
+  productName: string;          // বান্ডেলে প্রদর্শিত/ব্যবহৃত নাম (পরিবর্তনযোগ্য)
+  originalSellingPrice: number; // পণ্যের আসল নিয়মিত বিক্রয় মূল্য
+  bundleSellingPrice: number;   // এই বান্ডেলে নির্ধারিত বিক্রয় মূল্য (পরিবর্তনযোগ্য)
+  quantity: number;             // বান্ডেলে কয় পিস অন্তর্ভুক্ত
+  unit: string;
+}
+
+export interface ProductBundle {
+  id: string;
+  name: string;                 // বান্ডেলের নাম, যেমন: 'হিজামা ৩২ কাপ ফুল সেট'
+  category?: string;            // ক্যাটাগরি, যেমন: 'হিজামা প্যাকেজ'
+  description?: string;         // বিবরণ
+  bundlePrice: number;          // ঘোষিত মোট বান্ডেল বিক্রয় মূল্য (যেমন: ১৭৯০ টাকা)
+  items: BundleItem[];          // বান্ডেলের অন্তর্ভুক্ত আইটেমসমূহ
+  defaultDeliveryCharge?: number;
+  weightKg?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface OrderItem {
   productId: string;
   productName: string;
@@ -39,6 +61,8 @@ export interface OrderItem {
   unitPrice: number;     // বিক্রয়মূল্য
   purchasePrice: number; // ক্রয়মূল্য (লাভ গণনার জন্য)
   total: number;
+  bundleId?: string;     // যদি কোনো বান্ডেলের অংশ হিসেবে যুক্ত হয়
+  bundleName?: string;   // বান্ডেলের নাম
 }
 
 // কাস্টমার সাধারণত দেয়: ১. ক্যাশ, ২. কিউআর, ৩. বিকাশ, ৪. ব্যাংক (এবং অনলাইন COD ও বাকি)
@@ -248,6 +272,7 @@ export interface StoreSettings {
 
 export interface AppStateData {
   products: Product[];
+  bundles?: ProductBundle[];
   customers: Customer[];
   orders: Order[];
   duePayments: DuePaymentRecord[];

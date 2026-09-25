@@ -230,7 +230,14 @@ ${settings?.storeName || ''}`;
                   {order.items.map((it, idx) => (
                     <tr key={`${it.productId}-${idx}`} className="hover:bg-slate-50">
                       <td className="py-2 px-3 text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="py-2 px-3 font-semibold text-slate-900">{it.productName}</td>
+                      <td className="py-2 px-3 font-semibold text-slate-900">
+                        {it.productName}
+                        {it.bundleName && (
+                          <span className="ml-1.5 text-[10px] bg-teal-100 text-teal-800 px-1.5 py-0.2 rounded font-bold inline-block">
+                            🎁 {it.bundleName}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2 px-3 text-center font-bold text-slate-700">
                         {it.quantity} {it.unit}
                       </td>

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Product, UnitType } from '../types';
+import { Product, ProductBundle, UnitType } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { MoneyInput } from './MoneyInput';
+import { BundleModal } from './BundleModal';
 import { 
   Package, 
   Plus, 
@@ -16,14 +17,21 @@ import {
   Check, 
   ArrowUpDown,
   Barcode,
-  Truck
+  Truck,
+  Sparkles,
+  TrendingDown,
+  Gift
 } from 'lucide-react';
 
 interface StockManagementProps {
   products: Product[];
+  bundles?: ProductBundle[];
   onAddProduct: (product: Product) => void;
   onUpdateProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
+  onAddBundle?: (bundle: ProductBundle) => void;
+  onUpdateBundle?: (bundle: ProductBundle) => void;
+  onDeleteBundle?: (bundleId: string) => void;
 }
 
 const unitOptions: UnitType[] = [
@@ -40,13 +48,60 @@ const unitOptions: UnitType[] = [
 
 export const StockManagement: React.FC<StockManagementProps> = ({
   products,
+  bundles = [],
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
+  onAddBundle,
+  onUpdateBundle,
+  onDeleteBundle,
 }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'products' | 'bundles'>('products');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'low' | 'out'>('all');
+
+  // Bundle states
+  const [bundleSearchTerm, setBundleSearchTerm] = useState('');
+  const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
+  const [editingBundle, setEditingBundle] = useState<ProductBundle | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Helper: calculate available bundle stock based on underlying product inventory
+  const getBundleStockInfo = (bundle: ProductBundle) => {
+    if (!bundle.items || bundle.items.length === 0) return { count: 0, bottleneck: null };
+    let minSets = Infinity;
+    let bottleneck: { name: string; stock: number; required: number } | null = null;
+    for (const item of bundle.items) {
+      const prod = products.find((p) => p.id === item.productId);
+      const stock = prod ? prod.stockQty : 0;
+      const sets = item.quantity > 0 ? Math.floor(stock / item.quantity) : 0;
+      if (sets < minSets) {
+        minSets = sets;
+        bottleneck = {
+          name: item.productName,
+          stock,
+          required: item.quantity,
+        };
+      }
+    }
+    return {
+      count: minSets === Infinity ? 0 : Math.max(0, minSets),
+      bottleneck,
+    };
+  };
+
+  const filteredBundles = useMemo(() => {
+    const list = bundles || [];
+    const q = bundleSearchTerm.toLowerCase().trim();
+    if (!q) return list;
+    return list.filter((b) =>
+      b.name.toLowerCase().includes(q) ||
+      (b.category && b.category.toLowerCase().includes(q)) ||
+      (b.description && b.description.toLowerCase().includes(q)) ||
+      b.items.some((it) => it.productName.toLowerCase().includes(q))
+    );
+  }, [bundles, bundleSearchTerm]);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -220,62 +275,185 @@ export const StockManagement: React.FC<StockManagementProps> = ({
     setQuickAdjustProduct(null);
   };
 
+  // Bundle handlers
+  const handleSaveBundle = (bundle: ProductBundle) => {
+    if (editingBundle) {
+      if (onUpdateBundle) onUpdateBundle(bundle);
+      setToastMessage(`'${bundle.name}' বান্ডেলটি সফলভাবে আপডেট করা হয়েছে!`);
+    } else {
+      if (onAddBundle) onAddBundle(bundle);
+      setToastMessage(`'${bundle.name}' নতুন বান্ডেলটি সফলভাবে তৈরি ও সংরক্ষণ করা হয়েছে!`);
+    }
+    setActiveSubTab('bundles');
+    setIsBundleModalOpen(false);
+    setEditingBundle(null);
+  };
+
+  const handleDeleteBundle = (bundleId: string, bundleName: string) => {
+    if (confirm(`আপনি কি নিশ্চিত যে '${bundleName}' বান্ডেলটি মুছে ফেলতে চান?`)) {
+      if (onDeleteBundle) {
+        onDeleteBundle(bundleId);
+        setToastMessage(`'${bundleName}' বান্ডেলটি সফলভাবে ডিলিট করা হয়েছে!`);
+      }
+    }
+  };
+
+  // Bundle metrics
+  const bundleMetrics = useMemo(() => {
+    const list = bundles || [];
+    const totalBundles = list.length;
+    const totalReadySets = list.reduce((sum, b) => sum + getBundleStockInfo(b).count, 0);
+    const maxSavings = list.length > 0
+      ? Math.max(0, ...list.map((b) => {
+          const reg = b.items.reduce((s, it) => s + (it.originalSellingPrice || 0) * (it.quantity || 1), 0);
+          return reg - b.bundlePrice;
+        }))
+      : 0;
+    const totalReadyProfit = list.reduce((sum, b) => {
+      const readySets = getBundleStockInfo(b).count;
+      const cost = b.items.reduce((s, it) => {
+        const prod = products.find((p) => p.id === it.productId);
+        return s + (prod?.purchasePrice || 0) * (it.quantity || 1);
+      }, 0);
+      const profitPerSet = b.bundlePrice - cost;
+      return sum + (profitPerSet * readySets);
+    }, 0);
+
+    return { totalBundles, totalReadySets, maxSavings, totalReadyProfit };
+  }, [bundles, products]);
+
   return (
     <div id="stock-management-view" className="space-y-4">
-      {/* Top Inventory Metrics Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Metric 1: Total Products */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-            <Package className="w-5 h-5" />
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{toastMessage}</span>
           </div>
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500 font-medium">মোট পণ্য সংখ্যা</p>
-            <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              {metrics.totalProducts} টি
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 p-1 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Sub-Tab Navigation Bar: Single Products vs Bundles */}
+      <div className="bg-white p-2 rounded-xl shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+          <button
+            type="button"
+            id="tab-single-products"
+            onClick={() => setActiveSubTab('products')}
+            className={`px-3.5 py-1.5 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'products'
+                ? 'bg-white text-emerald-800 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Package className="w-4 h-4 text-emerald-600" />
+            <span>একক পণ্য তালিকা</span>
+            <span className="bg-emerald-100 text-emerald-800 text-[11px] px-2 py-0.2 rounded-full font-bold">
+              {products.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-bundle-packages"
+            onClick={() => setActiveSubTab('bundles')}
+            className={`px-3.5 py-1.5 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'bundles'
+                ? 'bg-teal-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-teal-300" />
+            <span>বান্ডেল ও কম্বো প্যাকেজ</span>
+            <span className={`text-[11px] px-2 py-0.2 rounded-full font-bold ${
+              activeSubTab === 'bundles' ? 'bg-teal-800 text-teal-100' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {(bundles || []).length}
+            </span>
+          </button>
         </div>
 
-        {/* Metric 2: Total Stock Cost Value */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-            <DollarSign className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500 font-medium">মোট স্টক ইনভেস্টমেন্ট (ক্রয়)</p>
-            <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              {formatCurrency(metrics.totalStockCost)}
-            </p>
-          </div>
-        </div>
-
-        {/* Metric 3: Expected Retail Revenue */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500 font-medium">প্রত্যাশিত বিক্রয় মূল্য</p>
-            <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              {formatCurrency(metrics.totalStockRevenue)}
-            </p>
-          </div>
-        </div>
-
-        {/* Metric 4: Low Stock Alerts */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500 font-medium">কম স্টক / শেষ পণ্য</p>
-            <p className="text-lg sm:text-xl font-bold text-rose-600 leading-tight">
-              {metrics.lowStockCount + metrics.outOfStockCount} টি
-            </p>
-          </div>
-        </div>
+        {activeSubTab === 'bundles' && (
+          <button
+            type="button"
+            id="btn-create-new-bundle"
+            onClick={() => {
+              setEditingBundle(null);
+              setIsBundleModalOpen(true);
+            }}
+            className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-xs flex items-center gap-2 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>নতুন বান্ডেল তৈরি করুন</span>
+          </button>
+        )}
       </div>
+
+      {/* VIEW 1: SINGLE PRODUCTS */}
+      {activeSubTab === 'products' && (
+        <div className="space-y-4">
+          {/* Top Inventory Metrics Bar */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {/* Metric 1: Total Products */}
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <Package className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">মোট পণ্য সংখ্যা</p>
+                <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+                  {metrics.totalProducts} টি
+                </p>
+              </div>
+            </div>
+
+            {/* Metric 2: Total Stock Cost Value */}
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <DollarSign className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">মোট স্টক ইনভেস্টমেন্ট (ক্রয়)</p>
+                <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+                  {formatCurrency(metrics.totalStockCost)}
+                </p>
+              </div>
+            </div>
+
+            {/* Metric 3: Expected Retail Revenue */}
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">প্রত্যাশিত বিক্রয় মূল্য</p>
+                <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+                  {formatCurrency(metrics.totalStockRevenue)}
+                </p>
+              </div>
+            </div>
+
+            {/* Metric 4: Low Stock Alerts */}
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">কম স্টক / শেষ পণ্য</p>
+                <p className="text-lg sm:text-xl font-bold text-rose-600 leading-tight">
+                  {metrics.lowStockCount + metrics.outOfStockCount} টি
+                </p>
+              </div>
+            </div>
+          </div>
 
       {/* Action Header & Search Controls */}
       <div className="bg-white p-4 rounded-xl shadow-xs border border-slate-200 space-y-3">
@@ -618,6 +796,318 @@ export const StockManagement: React.FC<StockManagementProps> = ({
           </table>
         </div>
       </div>
+    </div>
+  )}
+
+      {/* VIEW 2: BUNDLES & COMBO PACKAGES */}
+      {activeSubTab === 'bundles' && (
+        <div className="space-y-4">
+          {/* Bundle Metrics Bar */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">মোট সক্রিয় বান্ডেল</p>
+                <p className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+                  {bundleMetrics.totalBundles} টি প্যাকেজ
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <Package className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">ইনভেন্টরি থেকে প্রস্তুত সেট</p>
+                <p className="text-lg sm:text-xl font-bold text-blue-800 leading-tight">
+                  {bundleMetrics.totalReadySets} সেট
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <DollarSign className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">প্রস্তুত স্টকে প্রত্যাশিত নিট লাভ</p>
+                <p className="text-lg sm:text-xl font-bold text-emerald-700 leading-tight">
+                  {formatCurrency(bundleMetrics.totalReadyProfit)}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 sm:p-4 rounded-xl shadow-xs border border-slate-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                <TrendingDown className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 font-medium">সর্বোচ্চ গ্রাহক সাশ্রয়</p>
+                <p className="text-lg sm:text-xl font-bold text-indigo-700 leading-tight">
+                  {formatCurrency(bundleMetrics.maxSavings)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Bundle Search Bar & Action Header */}
+          <div className="bg-white p-4 rounded-xl shadow-xs border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                id="search-bundles-input"
+                type="text"
+                value={bundleSearchTerm}
+                onChange={(e) => setBundleSearchTerm(e.target.value)}
+                placeholder="বান্ডেলের নাম, ক্যাটাগরি বা অন্তর্ভুক্ত পণ্য খুঁজুন..."
+                className="w-full pl-10 pr-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setEditingBundle(null);
+                setIsBundleModalOpen(true);
+              }}
+              className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>নতুন বান্ডেল তৈরি</span>
+            </button>
+          </div>
+
+          {/* Bundles Grid */}
+          {filteredBundles.length === 0 ? (
+            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-xs space-y-3">
+              <div className="w-14 h-14 bg-teal-50 text-teal-600 rounded-2xl flex items-center justify-center mx-auto border border-teal-100">
+                <Layers className="w-7 h-7" />
+              </div>
+              <h3 className="text-base font-bold text-slate-800">কোনো বান্ডেল প্যাকেজ পাওয়া যায়নি</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                একাধিক পণ্যকে একসাথে বান্ডেল তৈরি করে বিশেষ মূল্যে বিক্রি করুন। যেমন: হিজামা পেন + নিডেল বক্স + ৩২ কাপ সেট = ফুল সেট।
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingBundle(null);
+                  setIsBundleModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>প্রথম বান্ডেল তৈরি করুন</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredBundles.map((bundle) => {
+                const stockInfo = getBundleStockInfo(bundle);
+                const regularTotal = bundle.items.reduce(
+                  (sum, it) => sum + (it.originalSellingPrice || 0) * (it.quantity || 1),
+                  0
+                );
+                const bundleCost = bundle.items.reduce((sum, it) => {
+                  const prod = products.find((p) => p.id === it.productId);
+                  return sum + (prod?.purchasePrice || 0) * (it.quantity || 1);
+                }, 0);
+                const bundleProfit = bundle.bundlePrice - bundleCost;
+                const bundleMargin = bundle.bundlePrice > 0 ? ((bundleProfit / bundle.bundlePrice) * 100).toFixed(1) : '0.0';
+                const savings = Math.max(0, regularTotal - bundle.bundlePrice);
+                const savingsPercent = regularTotal > 0 ? ((savings / regularTotal) * 100).toFixed(1) : 0;
+
+                return (
+                  <div
+                    key={bundle.id}
+                    className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group"
+                  >
+                    <div>
+                      {/* Card Header */}
+                      <div className="bg-gradient-to-r from-teal-50 via-slate-50 to-white p-4 border-b border-slate-200/80 flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200/60">
+                              {bundle.category || 'বান্ডেল'}
+                            </span>
+                            {savings > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                {formatCurrency(savings)} ছাড় ({savingsPercent}%)
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug">
+                            {bundle.name}
+                          </h3>
+                          {bundle.description && (
+                            <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">
+                              {bundle.description}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Action Buttons: Edit & Delete */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingBundle(bundle);
+                              setIsBundleModalOpen(true);
+                            }}
+                            className="p-1.5 text-teal-700 hover:bg-teal-100 rounded-lg transition-colors cursor-pointer"
+                            title="বান্ডেল সম্পাদনা করুন"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBundle(bundle.id, bundle.name)}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="বান্ডেল ডিলিট করুন"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pricing & Profit Details Block */}
+                      <div className="p-4 bg-teal-50/40 border-b border-teal-100/60 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-[10px] text-slate-500 block uppercase font-medium">
+                              বান্ডেল বিক্রয় দর
+                            </span>
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-lg sm:text-xl font-black text-teal-900">
+                                {formatCurrency(bundle.bundlePrice)}
+                              </span>
+                              {regularTotal > bundle.bundlePrice && (
+                                <span className="text-xs font-semibold text-slate-400 line-through">
+                                  {formatCurrency(regularTotal)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Available Sets Stock Badge */}
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-500 block uppercase font-medium">
+                              প্রস্তুত স্টক
+                            </span>
+                            <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg ${
+                              stockInfo.count === 0
+                                ? 'bg-rose-100 text-rose-700'
+                                : stockInfo.count <= 3
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              <Package className="w-3.5 h-3.5" />
+                              <span>{stockInfo.count} সেট সম্ভব</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Cost & Profit Row */}
+                        <div className="grid grid-cols-2 gap-2 bg-white/80 p-2 rounded-xl border border-teal-100 text-xs">
+                          <div>
+                            <span className="text-[10px] text-slate-500 block">উপাদান ক্রয় খরচ</span>
+                            <span className="font-bold text-slate-700">{formatCurrency(bundleCost)}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-500 block">
+                              {bundleProfit < 0 ? '⚠️ নিট লোকসান' : '💰 নিট লাভ (প্রতি সেট)'}
+                            </span>
+                            <span className={`font-black ${bundleProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {bundleProfit >= 0 ? `+${formatCurrency(bundleProfit)}` : `-${formatCurrency(Math.abs(bundleProfit))}`}
+                              <span className="text-[10px] font-bold text-slate-500 ml-1">({bundleMargin}%)</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Component Items List */}
+                      <div className="p-4 space-y-2">
+                        <span className="text-[11px] font-bold text-slate-600 block mb-1">
+                          অন্তর্ভুক্ত উপাদান পণ্যসমূহ ({bundle.items.length}টি):
+                        </span>
+                        <div className="space-y-1.5">
+                          {bundle.items.map((it, idx) => {
+                            const prod = products.find((p) => p.id === it.productId);
+                            const itemStock = prod ? prod.stockQty : 0;
+                            const isLow = itemStock <= 3;
+                            const itemCost = (prod?.purchasePrice || 0) * (it.quantity || 1);
+                            const itemRevenue = (it.bundleSellingPrice || 0) * (it.quantity || 1);
+                            const itemProfit = itemRevenue - itemCost;
+
+                            return (
+                              <div
+                                key={it.productId || idx}
+                                className="text-xs p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-semibold text-slate-800 block truncate">
+                                    {it.productName}
+                                  </span>
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                                    <span>পরিমাণ: {it.quantity} {it.unit}</span>
+                                    <span>•</span>
+                                    <span>ক্রয়: {formatCurrency(prod?.purchasePrice || 0)}</span>
+                                    <span>•</span>
+                                    <span className={isLow ? 'text-amber-700 font-bold' : 'text-slate-500'}>
+                                      স্টক: {itemStock} {it.unit}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="text-right shrink-0">
+                                  <span className="font-bold text-teal-950 block">
+                                    {formatCurrency(it.bundleSellingPrice)}
+                                  </span>
+                                  <span className={`text-[10px] font-bold block ${itemProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                    {itemProfit >= 0 ? `+${formatCurrency(itemProfit)}` : `-${formatCurrency(Math.abs(itemProfit))}`}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Footer: Stock Alert or Quick Edit */}
+                    <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
+                      {stockInfo.bottleneck && stockInfo.count <= 3 ? (
+                        <span className="text-[11px] text-amber-700 font-medium flex items-center gap-1 truncate">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{stockInfo.bottleneck.name}-এর স্টক কম ({stockInfo.bottleneck.stock} পিস)</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">
+                          বিক্রির সময় উপাদানগুলোর স্টক স্বয়ংক্রিয়ভাবে কমবে
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingBundle(bundle);
+                          setIsBundleModalOpen(true);
+                        }}
+                        className="text-teal-700 hover:text-teal-900 font-bold text-xs flex items-center gap-1 cursor-pointer shrink-0 ml-2"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        <span>সম্পাদনা</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ADD / EDIT PRODUCT MODAL */}
       {isModalOpen && (
@@ -900,6 +1390,18 @@ export const StockManagement: React.FC<StockManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* BUNDLE CREATE / EDIT MODAL */}
+      <BundleModal
+        isOpen={isBundleModalOpen}
+        onClose={() => {
+          setIsBundleModalOpen(false);
+          setEditingBundle(null);
+        }}
+        bundleToEdit={editingBundle}
+        products={products}
+        onSaveBundle={handleSaveBundle}
+      />
     </div>
   );
 };
