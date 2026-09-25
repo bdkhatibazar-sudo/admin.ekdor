@@ -1,137 +1,93 @@
-// Bengali numbers & currency formatting helpers
-
-export const banglaDigits: { [key: string]: string } = {
-  '0': '০',
-  '1': '১',
-  '2': '২',
-  '3': '৩',
-  '4': '৪',
-  '5': '৫',
-  '6': '৬',
-  '7': '৭',
-  '8': '৮',
-  '9': '৯',
-};
-
-export const englishDigits: { [key: string]: string } = {
-  '০': '0',
-  '১': '1',
-  '২': '2',
-  '৩': '3',
-  '৪': '4',
-  '৫': '5',
-  '৬': '6',
-  '৭': '7',
-  '৮': '8',
-  '৯': '9',
-};
-
 /**
- * Converts Bengali numerals (০-৯) to English numerals (0-9)
+ * Format currency with Bangladeshi Taka (৳) symbol and comma separation
  */
-export const toEnglishDigits = (val: string | number | undefined | null): string => {
-  if (val === undefined || val === null) return '';
-  const str = String(val);
-  return str.replace(/[০-৯]/g, (d) => englishDigits[d] || d);
-};
-
-/**
- * Safely parses any number input string (supports both English and Bengali digits, and decimal point)
- */
-export const parseNumberInput = (raw: string | number | undefined | null): number => {
-  if (raw === undefined || raw === null || raw === '') return 0;
-  if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
-  const eng = toEnglishDigits(raw);
-  const cleaned = eng.replace(/[^0-9.]/g, '');
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
-};
-
-export const toBanglaNumber = (num: number | string | undefined | null): string => {
-  if (num === undefined || num === null) return '০';
-  const str = Math.round(Number(num) * 100) / 100;
-  return str
-    .toString()
-    .replace(/\d/g, (d) => banglaDigits[d] || d);
-};
-
-export const formatCurrency = (amount: number, useBanglaDigits = false): string => {
-  const formatted = new Intl.NumberFormat('en-IN', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  }).format(amount || 0);
-
-  if (useBanglaDigits) {
-    return `৳${formatted.replace(/\d/g, (d) => banglaDigits[d] || d)}`;
+export function formatCurrency(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined || isNaN(amount)) {
+    return '৳0';
   }
-  return `৳ ${formatted}`;
-};
+  const rounded = Math.round(amount);
+  return `৳${rounded.toLocaleString('en-IN')}`;
+}
 
-export const formatDate = (dateStr: string): string => {
+/**
+ * Convert English digits to Bengali digits
+ */
+export function toBanglaNumber(num: number | string | null | undefined): string {
+  if (num === null || num === undefined) return '';
+  const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(num).replace(/[0-9]/g, (w) => banglaDigits[+w]);
+}
+
+/**
+ * Format date in localized / readable format
+ */
+export function formatDate(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '';
   try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('bn-BD', {
-      year: 'numeric',
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return String(dateInput);
+    return d.toLocaleDateString('en-GB', {
+      day: '2-digit',
       month: 'short',
-      day: 'numeric',
+      year: 'numeric',
     });
   } catch {
-    return dateStr;
+    return String(dateInput);
   }
-};
+}
 
-export const formatDateTime = (dateStr: string): string => {
+/**
+ * Format date and time
+ */
+export function formatDateTime(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '';
   try {
-    const d = new Date(dateStr);
-    return `${d.toLocaleDateString('bn-BD', {
-      year: 'numeric',
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return String(dateInput);
+    return d.toLocaleString('en-GB', {
+      day: '2-digit',
       month: 'short',
-      day: 'numeric',
-    })} | ${d.toLocaleTimeString('bn-BD', {
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-    })}`;
+    });
   } catch {
-    return dateStr;
+    return String(dateInput);
   }
-};
+}
 
-// Generate human-friendly invoice numbers
-export const generateInvoiceNumber = (): string => {
-  const now = new Date();
-  const year = now.getFullYear().toString().slice(-2);
-  const month = (now.getMonth() + 1).toString().padStart(2, '0');
-  const day = now.getDate().toString().padStart(2, '0');
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `INV-${year}${month}${day}-${random}`;
-};
+/**
+ * Resolves phone number for WhatsApp URL (adds 88 country code if BD local number)
+ */
+export function resolveWhatsAppNumber(phone?: string, fallbackPhone?: string): string {
+  const raw = phone || fallbackPhone || '';
+  let cleaned = raw.replace(/[^0-9]/g, '');
 
-// Resolve WhatsApp phone: 2nd WhatsApp number if provided, else 1st primary phone
-export const resolveWhatsAppNumber = (whatsapp?: string, phone?: string): string => {
-  if (whatsapp && whatsapp.trim()) {
-    return whatsapp.trim();
+  if (cleaned.startsWith('0088')) {
+    cleaned = cleaned.slice(2);
   }
-  if (phone && phone.trim()) {
-    return phone.trim();
-  }
-  return '';
-};
 
-// Generate clean wa.me URL
-export const createWhatsAppUrl = (phone: string, text: string): string => {
-  const clean = phone.replace(/[^0-9]/g, '');
-  const encoded = encodeURIComponent(text);
-  if (!clean) {
-    return `https://wa.me/?text=${encoded}`;
+  if (cleaned.startsWith('880')) {
+    return cleaned;
   }
-  // If Bangladesh 11 digit e.g. 017..., add 88 prefix
-  if (clean.length === 11 && clean.startsWith('01')) {
-    return `https://wa.me/88${clean}?text=${encoded}`;
-  }
-  if (clean.startsWith('8801')) {
-    return `https://wa.me/${clean}?text=${encoded}`;
-  }
-  return `https://wa.me/${clean}?text=${encoded}`;
-};
 
+  if (cleaned.startsWith('01') && cleaned.length === 11) {
+    return `88${cleaned}`;
+  }
+
+  if (cleaned.startsWith('1') && cleaned.length === 10) {
+    return `880${cleaned}`;
+  }
+
+  return cleaned;
+}
+
+/**
+ * Creates WhatsApp deep link / web link
+ */
+export function createWhatsAppUrl(phone: string, message: string): string {
+  const target = resolveWhatsAppNumber(phone);
+  const encodedText = encodeURIComponent(message);
+  return `https://wa.me/${target}?text=${encodedText}`;
+}
