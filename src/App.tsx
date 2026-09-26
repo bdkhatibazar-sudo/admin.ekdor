@@ -17,6 +17,7 @@ import {
   CourierRemittanceBatch
 } from './types';
 import { loadAppState, saveAppState } from './services/storage';
+import { syncToSupabase, fetchFromSupabase, subscribeToSupabaseChanges } from './services/supabase';
 import { formatCurrency } from './utils/formatters';
 
 // Components
@@ -33,6 +34,7 @@ import { BackupAndSettings } from './components/BackupAndSettings';
 import { ReceiptA5 } from './components/ReceiptA5';
 import { SaleSuccessView } from './components/SaleSuccessView';
 import { CustomerWebsiteSyncModal } from './components/CustomerWebsiteSyncModal';
+import { SupabaseSyncStatusBadge, SyncState } from './components/SupabaseSyncStatusBadge';
 
 // Icons
 import { 
@@ -77,6 +79,9 @@ export default function App() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isWebsiteSyncOpen, setIsWebsiteSyncOpen] = useState(false);
+  const [supabaseSyncState, setSupabaseSyncState] = useState<SyncState>('unconfigured');
+  const [supabaseLastSynced, setSupabaseLastSynced] = useState<string | undefined>(appState.lastSyncedAt);
+  const [supabaseErrorMsg, setSupabaseErrorMsg] = useState<string | undefined>(undefined);
 
   const handleStartEditOrder = (order: Order) => {
     setEditingOrder(order);
@@ -93,10 +98,56 @@ export default function App() {
     saveToCloud,
   } = useAuth();
 
-  // Monitor network online/offline status
+  // Function to perform immediate sync with Supabase and track state
+  const triggerSupabaseSync = async (stateToSync?: AppStateData) => {
+    const currentState = stateToSync || appState;
+    if (!currentState.settings.supabaseUrl || !currentState.settings.supabaseAnonKey) {
+      setSupabaseSyncState('unconfigured');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setSupabaseSyncState('offline');
+      return;
+    }
+
+    setSupabaseSyncState('syncing');
+    setSupabaseErrorMsg(undefined);
+
+    try {
+      const res = await syncToSupabase(currentState);
+      if (res.success) {
+        const now = new Date().toISOString();
+        setSupabaseSyncState('synced');
+        setSupabaseLastSynced(now);
+        setAppState((prev) => {
+          const updated = { ...prev, lastSyncedAt: now };
+          saveAppState(updated);
+          return updated;
+        });
+      } else {
+        setSupabaseSyncState('error');
+        setSupabaseErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setSupabaseSyncState('error');
+      setSupabaseErrorMsg(err?.message || 'সিঙ্ক হতে সমস্যা হয়েছে');
+    }
+  };
+
+  // Monitor network online/offline status and auto-sync when connection restores!
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      setIsOnline(true);
+      // Auto-sync offline queued changes immediately when internet returns!
+      if (appState.settings.supabaseUrl && appState.settings.supabaseAnonKey) {
+        triggerSupabaseSync();
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSupabaseSyncState('offline');
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -105,7 +156,187 @@ export default function App() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
+  }, [appState.settings.supabaseUrl, appState.settings.supabaseAnonKey]);
+
+  // 1. One-click URL Connect Parameter check (?sb_url=...&sb_key=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlParam = params.get('sb_url') || params.get('supabaseUrl');
+      const keyParam = params.get('sb_key') || params.get('supabaseKey');
+
+      if (urlParam && keyParam) {
+        const decodedUrl = decodeURIComponent(urlParam).trim();
+        const decodedKey = decodeURIComponent(keyParam).trim();
+
+        if (decodedUrl && decodedKey) {
+          setAppState((prev) => {
+            const nextSettings = {
+              ...prev.settings,
+              supabaseUrl: decodedUrl,
+              supabaseAnonKey: decodedKey,
+              autoSyncSupabase: true,
+            };
+            const next = { ...prev, settings: nextSettings };
+            saveAppState(next);
+
+            // Persist to server config so all other devices get it too
+            fetch('/api/server-config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ supabaseUrl: decodedUrl, supabaseAnonKey: decodedKey }),
+            }).catch(() => {});
+
+            return next;
+          });
+
+          // Clean URL so it stays clean
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    } catch (e) {
+      console.warn('URL connect param check failed:', e);
+    }
   }, []);
+
+  // 2. Multi-device Auto-Discovery: Check server-config so any other device gets Supabase credentials automatically without typing!
+  useEffect(() => {
+    fetch('/api/server-config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (cfg?.supabaseUrl && cfg?.supabaseAnonKey) {
+          setAppState((prev) => {
+            // If current device does not have Supabase credentials configured, adopt the server's credentials
+            if (!prev.settings.supabaseUrl || !prev.settings.supabaseAnonKey) {
+              const updatedSettings = {
+                ...prev.settings,
+                supabaseUrl: cfg.supabaseUrl,
+                supabaseAnonKey: cfg.supabaseAnonKey,
+                autoSyncSupabase: cfg.autoSyncSupabase !== false,
+              };
+              const updated = {
+                ...prev,
+                settings: updatedSettings,
+              };
+              saveAppState(updated);
+
+              // Instantly fetch all store data on this new device!
+              fetchFromSupabase(updatedSettings).then((res) => {
+                if (res.success && res.data) {
+                  const now = new Date().toISOString();
+                  setAppState((p) => {
+                    const merged = {
+                      ...p,
+                      ...res.data,
+                      settings: updatedSettings,
+                      lastSyncedAt: now,
+                    };
+                    saveAppState(merged);
+                    return merged;
+                  });
+                  setSupabaseSyncState('synced');
+                  setSupabaseLastSynced(now);
+                }
+              }).catch(() => {});
+
+              return updated;
+            }
+            return prev;
+          });
+        }
+      })
+      .catch((err) => console.warn('Server config auto-discovery skipped:', err));
+  }, []);
+
+  // Multi-device sync: Listen to BroadcastChannel across browser tabs on the same computer
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    try {
+      const channel = new BroadcastChannel('ekdor_pos_sync_channel');
+      channel.onmessage = (event) => {
+        if (event.data?.type === 'STATE_UPDATED') {
+          const fresh = loadAppState();
+          setAppState(fresh);
+        }
+      };
+      return () => channel.close();
+    } catch {}
+  }, []);
+
+  // Supabase: Initial fetch on mount or when settings change to ensure latest data from other devices
+  useEffect(() => {
+    if (!appState.settings.supabaseUrl || !appState.settings.supabaseAnonKey) {
+      setSupabaseSyncState('unconfigured');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setSupabaseSyncState('offline');
+      return;
+    }
+
+    let isMounted = true;
+    setSupabaseSyncState('syncing');
+
+    (async () => {
+      try {
+        const res = await fetchFromSupabase(appState.settings);
+        if (isMounted && res.success && res.data) {
+          const now = new Date().toISOString();
+          setAppState((prev) => {
+            const next = {
+              ...prev,
+              ...res.data,
+              settings: prev.settings,
+              lastSyncedAt: now,
+            };
+            saveAppState(next);
+            return next;
+          });
+          setSupabaseSyncState('synced');
+          setSupabaseLastSynced(now);
+        } else if (isMounted && !res.success) {
+          setSupabaseSyncState('error');
+          setSupabaseErrorMsg(res.message);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setSupabaseSyncState('error');
+          setSupabaseErrorMsg(err?.message || 'ক্লাউড থেকে তথ্য লোড করতে সমস্যা হয়েছে');
+        }
+      }
+    })();
+
+    // Subscribe to Supabase realtime events so when Device B saves, Device A updates immediately!
+    const unsubscribe = subscribeToSupabaseChanges(appState.settings, async () => {
+      try {
+        const res = await fetchFromSupabase(appState.settings);
+        if (res.success && res.data) {
+          const now = new Date().toISOString();
+          setAppState((prev) => {
+            const next = {
+              ...prev,
+              ...res.data,
+              settings: prev.settings,
+              lastSyncedAt: now,
+            };
+            saveAppState(next);
+            return next;
+          });
+          setSupabaseSyncState('synced');
+          setSupabaseLastSynced(now);
+        }
+      } catch (err) {
+        console.warn('Realtime Supabase sync pull error:', err);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [appState.settings.supabaseUrl, appState.settings.supabaseAnonKey]);
 
   // Sync state with Cloud SQL when user signs in
   useEffect(() => {
@@ -140,13 +371,41 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Save to localStorage and Cloud SQL whenever state changes
+  // Save to localStorage, Supabase (for multi-device sync), and Cloud SQL whenever state changes
   const updateStateAndPersist = (updater: (prev: AppStateData) => AppStateData) => {
     setAppState((prev) => {
       const next = updater(prev);
       saveAppState(next);
       if (currentUser) {
         saveToCloud(next);
+      }
+      // Auto-sync to Supabase in the background if configured
+      if (next.settings.supabaseUrl && next.settings.supabaseAnonKey && next.settings.autoSyncSupabase !== false) {
+        if (!navigator.onLine) {
+          setSupabaseSyncState('offline');
+        } else {
+          setSupabaseSyncState('syncing');
+          syncToSupabase(next)
+            .then((res) => {
+              if (res.success) {
+                const now = new Date().toISOString();
+                setSupabaseSyncState('synced');
+                setSupabaseLastSynced(now);
+                setAppState((s) => {
+                  const withTimestamp = { ...s, lastSyncedAt: now };
+                  saveAppState(withTimestamp);
+                  return withTimestamp;
+                });
+              } else {
+                setSupabaseSyncState('error');
+                setSupabaseErrorMsg(res.message);
+              }
+            })
+            .catch((err) => {
+              setSupabaseSyncState('error');
+              setSupabaseErrorMsg(err?.message || 'সিঙ্ক ব্যর্থ হয়েছে');
+            });
+        }
       }
       return next;
     });
@@ -914,6 +1173,19 @@ export default function App() {
       ...prev,
       settings: newSettings,
     }));
+
+    // Broadcast to server so ANY other device (phone, PC, tablet) automatically gets it!
+    if (newSettings.supabaseUrl || newSettings.supabaseAnonKey) {
+      fetch('/api/server-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supabaseUrl: newSettings.supabaseUrl,
+          supabaseAnonKey: newSettings.supabaseAnonKey,
+          autoSyncSupabase: newSettings.autoSyncSupabase !== false,
+        }),
+      }).catch((e) => console.warn('Failed to broadcast server-config:', e));
+    }
   };
 
   const handleRestoreState = (newState: AppStateData) => {
@@ -1046,16 +1318,16 @@ export default function App() {
               <span>{formatCurrency(currentCashBalance)}</span>
             </button>
 
-            {/* Offline Local Free Badge (100% Free, No Google Cloud Bill) */}
-            <div 
-              onClick={() => setActiveTab('backup_sync')}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
-              title="১০০% অফলাইন ও লোকাল খাতা সক্রিয় (সম্পূর্ণ ফ্রি)"
-            >
-              <HardDrive className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden lg:inline">লোকাল খাতা (১০০% ফ্রি)</span>
-              <span className="lg:hidden text-[11px]">ফ্রি খাতা</span>
-            </div>
+            {/* Database & Cloud Status Badge (Multi-device Realtime Sync) */}
+            <SupabaseSyncStatusBadge
+              settings={appState.settings}
+              syncState={supabaseSyncState}
+              lastSyncedAt={supabaseLastSynced}
+              errorMessage={supabaseErrorMsg}
+              isOnline={isOnline}
+              onManualSync={() => triggerSupabaseSync()}
+              onOpenSettings={() => setActiveTab('backup_sync')}
+            />
 
             {/* Quick Customer Website Sync Button */}
             <button

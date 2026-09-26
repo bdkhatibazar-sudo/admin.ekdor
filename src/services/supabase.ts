@@ -71,19 +71,30 @@ export const syncToSupabase = async (state: AppStateData): Promise<{ success: bo
   }
 
   try {
-    // 1. Sync Products
+    // 1. Sync Products (with all website and catalog fields)
     if (state.products.length > 0) {
       const productRows = state.products.map((p) => ({
         id: p.id,
+        pd_id: p.pdId !== undefined ? String(p.pdId) : null,
+        serial_no: p.serialNo !== undefined ? Number(p.serialNo) : null,
         name: p.name,
         bangla_name: p.banglaName || null,
         category: p.category,
         barcode: p.barcode || null,
         purchase_price: p.purchasePrice,
         selling_price: p.sellingPrice,
+        regular_price: p.regularPrice !== undefined ? p.regularPrice : null,
         stock_qty: p.stockQty,
         min_stock_alert: p.minStockAlert,
         unit: p.unit,
+        image_url: p.imageUrl || null,
+        video_url: p.videoUrl || null,
+        description: p.description || null,
+        search_keywords: p.searchKeywords || null,
+        is_active: p.isActive !== false,
+        delivery_dhaka: p.deliveryDhaka !== undefined ? p.deliveryDhaka : null,
+        delivery_sub_dhaka: p.deliverySubDhaka !== undefined ? p.deliverySubDhaka : null,
+        delivery_outside: p.deliveryOutside !== undefined ? p.deliveryOutside : null,
         updated_at: p.updatedAt,
       }));
       const { error: prodErr } = await client.from('products').upsert(productRows, { onConflict: 'id' });
@@ -176,9 +187,51 @@ export const syncToSupabase = async (state: AppStateData): Promise<{ success: bo
       if (purchErr && purchErr.code !== '42P01') console.warn('Purchases sync err:', purchErr);
     }
 
+    // 6. Sync Bundles (if table exists)
+    if (state.bundles && state.bundles.length > 0) {
+      const bundleRows = state.bundles.map((b) => ({
+        id: b.id,
+        bundle_id: b.bundleId !== undefined ? String(b.bundleId) : null,
+        name: b.name,
+        category: b.category || null,
+        description: b.description || null,
+        bundle_price: b.bundlePrice,
+        items: b.items,
+        updated_at: b.updatedAt || new Date().toISOString(),
+      }));
+      try {
+        await client.from('bundles').upsert(bundleRows, { onConflict: 'id' });
+      } catch (bundleErr) {
+        console.warn('Bundles table sync skip:', bundleErr);
+      }
+    }
+
+    // 7. Sync Store App State Metadata (for instant exact replica across all devices)
+    try {
+      await client.from('app_state_backup').upsert({
+        id: 'main_store_data',
+        payload: {
+          products: state.products,
+          bundles: state.bundles,
+          customers: state.customers,
+          orders: state.orders,
+          duePayments: state.duePayments,
+          supplierDuePayments: state.supplierDuePayments,
+          expenses: state.expenses,
+          purchases: state.purchases,
+          cashAdjustments: state.cashAdjustments,
+          courierRemittances: state.courierRemittances,
+          settings: state.settings,
+        },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    } catch (metaErr) {
+      // app_state_backup is optional helper
+    }
+
     return {
       success: true,
-      message: 'সকল পণ্য, কাস্টমার, অর্ডার, খরচ ও ক্রয়ের তথ্য Supabase-এ সফলভাবে সিঙ্ক হয়েছে!',
+      message: 'সব ডিভাইসের জন্য পণ্য, কাস্টমার, অর্ডার, খরচ ও ক্রয়ের তথ্য Supabase-এ সফলভাবে সংরক্ষিত হয়েছে!',
     };
   } catch (err: any) {
     console.error('Supabase sync error:', err);
@@ -186,6 +239,39 @@ export const syncToSupabase = async (state: AppStateData): Promise<{ success: bo
       success: false,
       message: `সিঙ্ক ব্যর্থ হয়েছে: ${err?.message || 'অজানা ত্রুটি'}`,
     };
+  }
+};
+
+/**
+ * Subscribe to Supabase realtime changes across multiple devices
+ */
+export const subscribeToSupabaseChanges = (
+  settings: StoreSettings,
+  onRemoteChange: () => void
+): (() => void) => {
+  const client = getSupabaseClient(settings);
+  if (!client) return () => {};
+
+  try {
+    const channel = client
+      .channel('ekdor_multidevice_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        () => {
+          onRemoteChange();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch {}
+    };
+  } catch (err) {
+    console.warn('Realtime subscription error:', err);
+    return () => {};
   }
 };
 
@@ -199,18 +285,51 @@ export const fetchFromSupabase = async (
   }
 
   try {
+    // First try app_state_backup which stores the full synchronized snapshot
+    try {
+      const { data: backupRow } = await client
+        .from('app_state_backup')
+        .select('payload')
+        .eq('id', 'main_store_data')
+        .single();
+      if (backupRow?.payload) {
+        const p = backupRow.payload;
+        return {
+          success: true,
+          data: {
+            products: p.products || [],
+            bundles: p.bundles || [],
+            customers: p.customers || [],
+            orders: p.orders || [],
+            duePayments: p.duePayments || [],
+            supplierDuePayments: p.supplierDuePayments || [],
+            expenses: p.expenses || [],
+            purchases: p.purchases || [],
+            cashAdjustments: p.cashAdjustments || [],
+            courierRemittances: p.courierRemittances || [],
+            settings: { ...settings, ...(p.settings || {}) },
+          },
+          message: 'Supabase ক্লাউড থেকে সর্বশেষ সমস্ত হিসাব (পণ্য, অর্ডার, বাকি খাতা ও সেটিংস) সফলভাবে লোড হয়েছে!',
+        };
+      }
+    } catch {
+      // Fallback to table queries below
+    }
+
     const [
       { data: prods, error: prodErr },
       { data: custs, error: custErr },
       { data: ords, error: ordErr },
       { data: exps, error: expErr },
       { data: purchs, error: purchErr },
+      { data: bndls },
     ] = await Promise.all([
       client.from('products').select('*'),
       client.from('customers').select('*'),
       client.from('orders').select('*'),
       client.from('expenses').select('*'),
       client.from('purchases').select('*'),
+      client.from('bundles').select('*'),
     ]);
 
     if (prodErr || custErr || ordErr || expErr || purchErr) {
@@ -226,16 +345,39 @@ export const fetchFromSupabase = async (
 
     const products = (prods || []).map((p: any) => ({
       id: p.id,
+      pdId: p.pd_id || undefined,
+      serialNo: p.serial_no ? Number(p.serial_no) : undefined,
       name: p.name,
       banglaName: p.bangla_name || undefined,
       category: p.category,
       barcode: p.barcode || undefined,
       purchasePrice: Number(p.purchase_price) || 0,
       sellingPrice: Number(p.selling_price) || 0,
+      regularPrice: p.regular_price ? Number(p.regular_price) : undefined,
       stockQty: Number(p.stock_qty) || 0,
       minStockAlert: Number(p.min_stock_alert) || 5,
       unit: p.unit || 'পিস',
+      imageUrl: p.image_url || undefined,
+      videoUrl: p.video_url || undefined,
+      description: p.description || undefined,
+      searchKeywords: p.search_keywords || undefined,
+      isActive: p.is_active !== false,
+      deliveryDhaka: p.delivery_dhaka ? Number(p.delivery_dhaka) : undefined,
+      deliverySubDhaka: p.delivery_sub_dhaka ? Number(p.delivery_sub_dhaka) : undefined,
+      deliveryOutside: p.delivery_outside ? Number(p.delivery_outside) : undefined,
       updatedAt: p.updated_at || new Date().toISOString(),
+    }));
+
+    const bundles = (bndls || []).map((b: any) => ({
+      id: b.id,
+      bundleId: b.bundle_id || undefined,
+      name: b.name,
+      category: b.category || undefined,
+      description: b.description || undefined,
+      bundlePrice: Number(b.bundle_price) || 0,
+      items: b.items || [],
+      createdAt: b.created_at || b.updated_at || new Date().toISOString(),
+      updatedAt: b.updated_at || new Date().toISOString(),
     }));
 
     const customers = (custs || []).map((c: any) => ({
@@ -310,7 +452,7 @@ export const fetchFromSupabase = async (
 
     return {
       success: true,
-      data: { products, customers, orders, expenses, purchases },
+      data: { products, bundles, customers, orders, expenses, purchases },
       message: `Supabase থেকে ${products.length}টি পণ্য, ${customers.length}জন কাস্টমার, ${orders.length}টি অর্ডার সফলভাবে লোড হয়েছে!`,
     };
   } catch (err: any) {
@@ -323,22 +465,52 @@ export const fetchFromSupabase = async (
 };
 
 // SQL Schema for the user to copy-paste into Supabase SQL Editor
-export const SUPABASE_SQL_SCHEMA = `-- 1. Products (পণ্য ও স্টক)
+export const SUPABASE_SQL_SCHEMA = `-- 1. App State Master Snapshot (সহজ ও ১০০% নির্ভুল মাল্টি-ডিভাইস সিঙ্ক)
+create table if not exists app_state_backup (
+  id text primary key,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+
+-- 2. Products (পণ্য ও স্টক)
 create table if not exists products (
   id text primary key,
+  pd_id text,
+  serial_no integer,
   name text not null,
   bangla_name text,
   category text,
   barcode text,
   purchase_price numeric default 0,
   selling_price numeric default 0,
+  regular_price numeric,
   stock_qty numeric default 0,
   min_stock_alert numeric default 5,
   unit text default 'পিস',
+  image_url text,
+  video_url text,
+  description text,
+  search_keywords text,
+  is_active boolean default true,
+  delivery_dhaka numeric default 70,
+  delivery_sub_dhaka numeric default 100,
+  delivery_outside numeric default 130,
   updated_at timestamptz default now()
 );
 
--- 2. Customers (গ্রাহক ও বাকি খাতা)
+-- 3. Bundles (পণ্য বান্ডেল ও প্যাকেজ)
+create table if not exists bundles (
+  id text primary key,
+  bundle_id text,
+  name text not null,
+  category text,
+  description text,
+  bundle_price numeric default 0,
+  items jsonb default '[]'::jsonb,
+  updated_at timestamptz default now()
+);
+
+-- 4. Customers (গ্রাহক ও বাকি খাতা)
 create table if not exists customers (
   id text primary key,
   name text not null,
@@ -351,7 +523,7 @@ create table if not exists customers (
   updated_at timestamptz default now()
 );
 
--- 3. Orders (বিক্রয় ও চালান - প্রাপকের তথ্যসহ)
+-- 5. Orders (বিক্রয় ও চালান - প্রাপকের তথ্যসহ)
 create table if not exists orders (
   id text primary key,
   invoice_number text not null,
@@ -381,7 +553,7 @@ create table if not exists orders (
   updated_at timestamptz default now()
 );
 
--- 4. Expenses (দোকানের খরচ)
+-- 6. Expenses (দোকানের খরচ)
 create table if not exists expenses (
   id text primary key,
   title text not null,
@@ -392,7 +564,7 @@ create table if not exists expenses (
   note text
 );
 
--- 5. Purchases (মাল ক্রয় ও মহাজনের চালান)
+-- 7. Purchases (মাল ক্রয় ও মহাজনের চালান)
 create table if not exists purchases (
   id text primary key,
   invoice_number text not null,
@@ -409,13 +581,17 @@ create table if not exists purchases (
 );
 
 -- Row Level Security (RLS) Enable
+alter table app_state_backup enable row level security;
 alter table products enable row level security;
+alter table bundles enable row level security;
 alter table customers enable row level security;
 alter table orders enable row level security;
 alter table expenses enable row level security;
 alter table purchases enable row level security;
 
+create policy "Anon full access app_state_backup" on app_state_backup for all using (true) with check (true);
 create policy "Anon full access products" on products for all using (true) with check (true);
+create policy "Anon full access bundles" on bundles for all using (true) with check (true);
 create policy "Anon full access customers" on customers for all using (true) with check (true);
 create policy "Anon full access orders" on orders for all using (true) with check (true);
 create policy "Anon full access expenses" on expenses for all using (true) with check (true);

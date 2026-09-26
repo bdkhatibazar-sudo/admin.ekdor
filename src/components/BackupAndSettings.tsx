@@ -36,7 +36,10 @@ import {
   Truck,
   Eye,
   EyeOff,
-  Zap
+  Zap,
+  QrCode,
+  Link2,
+  Share2
 } from 'lucide-react';
 
 interface BackupAndSettingsProps {
@@ -67,6 +70,8 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
   const [supabaseFeedback, setSupabaseFeedback] = useState<{ success: boolean; message: string } | null>(null);
   const [showSqlSchema, setShowSqlSchema] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedQuickLink, setCopiedQuickLink] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   // Courier states (Steadfast / Packzy)
   const [courierApiKey, setCourierApiKey] = useState(settings.courierApiKey || 'ic4pg2oo3xdnruhyalv7yy4qfgxyoytl');
@@ -337,7 +342,17 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
                 <input
                   type="text"
                   value={supabaseUrl}
-                  onChange={(e) => setSupabaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSupabaseUrl(val);
+                    const updated = { ...formData, supabaseUrl: val.trim() };
+                    setFormData(updated);
+                    onUpdateSettings(updated);
+                  }}
+                  onBlur={() => {
+                    const updated = { ...formData, supabaseUrl: supabaseUrl.trim(), supabaseAnonKey: supabaseAnonKey.trim() };
+                    onUpdateSettings(updated);
+                  }}
                   placeholder="https://xyzcompany.supabase.co"
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-xs"
                 />
@@ -350,10 +365,43 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
                 <input
                   type="password"
                   value={supabaseAnonKey}
-                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSupabaseAnonKey(val);
+                    const updated = { ...formData, supabaseAnonKey: val.trim() };
+                    setFormData(updated);
+                    onUpdateSettings(updated);
+                  }}
+                  onBlur={() => {
+                    const updated = { ...formData, supabaseUrl: supabaseUrl.trim(), supabaseAnonKey: supabaseAnonKey.trim() };
+                    onUpdateSettings(updated);
+                  }}
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-xs"
                 />
+              </div>
+
+              {/* Realtime Multi-device Auto Sync Switch */}
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1.5">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <span className="font-bold text-slate-800 text-xs sm:text-sm block">স্বয়ংক্রিয় রিয়েলটাইম সিঙ্ক (Multi-device Realtime Sync)</span>
+                      <span className="text-[11px] text-slate-500">এক ডিভাইসে পণ্য বা অর্ডার সেভ হলে অন্য সব ডিভাইসে সাথে সাথে আপডেট হবে</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={formData.autoSyncSupabase !== false}
+                    onChange={(e) => {
+                      const updated = { ...formData, autoSyncSupabase: e.target.checked };
+                      setFormData(updated);
+                      onUpdateSettings(updated);
+                    }}
+                    className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                  />
+                </label>
               </div>
 
               {/* Action Buttons: Test, Sync, Fetch */}
@@ -402,6 +450,84 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
                     <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   )}
                   <span>{supabaseFeedback.message}</span>
+                </div>
+              )}
+
+              {/* One-device Multi-device Connect Helper Card */}
+              {supabaseUrl && supabaseAnonKey && (
+                <div className="p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300 rounded-xl space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 text-emerald-700" />
+                      <span className="font-bold text-slate-800 text-xs sm:text-sm">
+                        অন্যান্য ডিভাইস অটো-কানেক্ট (এক ডিভাইসে বসালেই যথেষ্ট)
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 text-[10px] font-bold rounded-full">
+                      সার্ভার অটো-সেভ সক্রিয়
+                    </span>
+                  </div>
+
+                  <p className="text-slate-600 text-xs leading-relaxed">
+                    ✨ <strong>জিরো-সেটআপ সুবিধা:</strong> এই ডিভাইসে আপনি যে Supabase URL ও Key দিয়েছেন, তা এই অ্যাপের সার্ভার স্বয়ংক্রিয়ভাবে মনে রেখেছে। ফলে আপনার ফোন, ট্যাবলেট বা অন্য কম্পিউটারে <strong>শুধু এই সাইটটি ব্রাউজারে খুললেই হলো—কোনো URL বা Key লিখতে হবে না</strong>, সব হিসাব অটো-লোড হয়ে যাবে!
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const link = `${window.location.origin}/?sb_url=${encodeURIComponent(supabaseUrl.trim())}&sb_key=${encodeURIComponent(supabaseAnonKey.trim())}`;
+                        navigator.clipboard.writeText(link);
+                        setCopiedQuickLink(true);
+                        setTimeout(() => setCopiedQuickLink(false), 2500);
+                      }}
+                      className="px-3 py-1.5 bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      {copiedQuickLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700 font-bold">লিংক কপি হয়েছে!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>কুইক কানেক্ট লিংক কপি</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowQrModal(!showQrModal)}
+                      className="px-3 py-1.5 bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      <QrCode className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{showQrModal ? 'QR কোড লুকান' : 'মোবাইলে ক্যামেরা দিয়ে স্ক্যান (QR)'}</span>
+                    </button>
+                  </div>
+
+                  {showQrModal && (
+                    <div className="mt-2 p-3 bg-white border border-emerald-200 rounded-xl flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
+                      <div className="bg-white p-2 border border-slate-200 rounded-lg shadow-2xs shrink-0">
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                            `${window.location.origin}/?sb_url=${encodeURIComponent(supabaseUrl.trim())}&sb_key=${encodeURIComponent(supabaseAnonKey.trim())}`
+                          )}`}
+                          alt="Quick Connect QR Code"
+                          className="w-32 h-32 object-contain"
+                        />
+                      </div>
+                      <div className="space-y-1.5 text-xs">
+                        <h5 className="font-bold text-slate-800 flex items-center gap-1.5 justify-center sm:justify-start">
+                          <Smartphone className="w-4 h-4 text-emerald-600" />
+                          <span>মোবাইলের ক্যামেরা দিয়ে স্ক্যান করুন</span>
+                        </h5>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+                          যেকোনো স্মার্টফোনের ক্যামেরা বা কিউআর কোড স্ক্যানার দিয়ে স্ক্যান করলে সফটওয়্যারটি সরাসরি ফোনে কানেক্ট হয়ে যাবে এবং মুহূর্তের মধ্যে সমস্ত পণ্য ও বাকি খাতা লাইভ দেখা যাবে।
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

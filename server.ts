@@ -211,6 +211,51 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Global Multi-device Supabase & Store Config API
+const SERVER_CONFIG_PATH = path.join(__dirname, 'server-config.json');
+
+function getServerConfig() {
+  let saved: any = {};
+  try {
+    if (fs.existsSync(SERVER_CONFIG_PATH)) {
+      const data = fs.readFileSync(SERVER_CONFIG_PATH, 'utf-8');
+      saved = JSON.parse(data);
+    }
+  } catch (err) {
+    console.warn('Could not read server-config.json:', err);
+  }
+
+  return {
+    supabaseUrl: saved.supabaseUrl || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '',
+    supabaseAnonKey: saved.supabaseAnonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+    autoSyncSupabase: saved.autoSyncSupabase !== false,
+    updatedAt: saved.updatedAt || null,
+  };
+}
+
+app.get('/api/server-config', (req, res) => {
+  res.json(getServerConfig());
+});
+
+app.post('/api/server-config', (req, res) => {
+  try {
+    const current = getServerConfig();
+    const updated = {
+      ...current,
+      supabaseUrl: req.body.supabaseUrl !== undefined ? String(req.body.supabaseUrl).trim() : current.supabaseUrl,
+      supabaseAnonKey: req.body.supabaseAnonKey !== undefined ? String(req.body.supabaseAnonKey).trim() : current.supabaseAnonKey,
+      autoSyncSupabase: req.body.autoSyncSupabase !== undefined ? Boolean(req.body.autoSyncSupabase) : current.autoSyncSupabase,
+      updatedAt: new Date().toISOString(),
+    };
+
+    fs.writeFileSync(SERVER_CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8');
+    res.json({ success: true, config: updated });
+  } catch (err: any) {
+    console.error('Error saving server-config.json:', err);
+    res.status(500).json({ error: err.message || 'Failed to save server config' });
+  }
+});
+
 // Vite or Static Serving
 async function setupViteOrStatic() {
   const distPath = path.resolve(__dirname, 'dist');
