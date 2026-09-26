@@ -2,17 +2,28 @@ export type UnitType = 'পিস' | 'কেজি' | 'গ্রাম' | 'ল�
 
 export interface Product {
   id: string;
+  pdId?: number | string;        // কাস্টমার সাইটের জন্য PD_ID (যেমন: 4, 67, 1200)
+  serialNo?: number;             // ক্রমিক
   name: string;
   banglaName?: string;
   category: string;
   barcode?: string;
-  purchasePrice: number; // ক্রয়মূল্য
-  sellingPrice: number;  // বিক্রয়মূল্য
-  stockQty: number;      // বর্তমান স্টক
-  minStockAlert: number; // কম স্টক সতর্কবার্তা সীমা
+  purchasePrice: number;         // ক্রয়মূল্য
+  sellingPrice: number;          // বিক্রয়মূল্য (কাস্টমার সাইটে 'বিক্রি')
+  regularPrice?: number;         // পূর্বের নিয়মিত দর (কাস্টমার সাইটে 'দর')
+  stockQty: number;              // বর্তমান স্টক
+  minStockAlert: number;         // কম স্টক সতর্কবার্তা সীমা
   unit: UnitType;
-  defaultDeliveryCharge?: number; // পণ্যের আনুমানিক কুরিয়ার ডেলিভারি চার্জ (যেমন ১৩০ টাকা)
-  weightKg?: number;             // পণ্যের ওজন (কেজি) - কুরিয়ার ওজন চার্জ হিসাবের জন্য
+  defaultDeliveryCharge?: number; // পণ্যের আনুমানিক কুরিয়ার ডেলিভারি চার্জ
+  deliveryDhaka?: number;        // ঢাকা সিটি ডেলিভারি চার্জ (যেমন: ৭০)
+  deliverySubDhaka?: number;     // ঢাকার পার্শ্ববর্তী ডেলিভারি চার্জ (যেমন: ১০০)
+  deliveryOutside?: number;      // ঢাকার বাইরে ডেলিভারি চার্জ (যেমন: ১৩০)
+  imageUrl?: string;             // পণ্যের ছবির লিংক
+  videoUrl?: string;             // পণ্যের ভিডিওর লিংক (ইউটিউব)
+  description?: string;          // পণ্যের বিস্তারিত বর্ণনা
+  searchKeywords?: string;       // সার্চ কি-ওয়ার্ড
+  isActive?: boolean;            // ওয়েবসাইটে সক্রিয়/দৃশ্যমান কিনা (active: true/false)
+  weightKg?: number;             // পণ্যের ওজন (কেজি)
   updatedAt: string;
 }
 
@@ -42,8 +53,9 @@ export interface BundleItem {
 
 export interface ProductBundle {
   id: string;
+  bundleId?: number | string;   // যেমন: 1200, 1300, 3200, 9910
   name: string;                 // বান্ডেলের নাম, যেমন: 'হিজামা ৩২ কাপ ফুল সেট'
-  category?: string;            // ক্যাটাগরি, যেমন: 'হিজামা প্যাকেজ'
+  category?: string;            // ক্যাটাগরি, যেমন: 'হিজামা'
   description?: string;         // বিবরণ
   bundlePrice: number;          // ঘোষিত মোট বান্ডেল বিক্রয় মূল্য (যেমন: ১৭৯০ টাকা)
   items: BundleItem[];          // বান্ডেলের অন্তর্ভুক্ত আইটেমসমূহ
@@ -268,6 +280,12 @@ export interface StoreSettings {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   autoSyncSupabase?: boolean; // স্বয়ংক্রিয় ব্যাকগ্রাউন্ড সিঙ্ক
+  githubRepo?: string;         // যেমন: 'bdkhatibazar-sudo/ekdor'
+  githubToken?: string;        // GitHub Personal Access Token (PAT)
+  githubBranch?: string;       // যেমন: 'main'
+  githubProductsPath?: string; // 'products.json'
+  githubCategoriesPath?: string; // 'categories.json'
+  githubBundlePath?: string;   // 'bundle.json'
 }
 
 export interface AppStateData {

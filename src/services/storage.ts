@@ -1,4 +1,5 @@
 import { AppStateData, Product, ProductBundle, Customer, Order, DuePaymentRecord, SupplierDuePayment, CashAdjustment, Expense, PurchaseRecord, StoreSettings } from '../types';
+import { seedProducts, seedBundles } from '../data/seedCatalog';
 
 const STORAGE_KEY = 'dokan_khata_pos_data_v2';
 const LEGACY_STORAGE_KEY = 'dokan_khata_pos_data_v1';
@@ -24,6 +25,11 @@ const defaultSettings: StoreSettings = {
   supabaseUrl: '',
   supabaseAnonKey: '',
   autoSyncSupabase: true,
+  githubRepo: 'bdkhatibazar-sudo/ekdor',
+  githubBranch: 'main',
+  githubProductsPath: 'products.json',
+  githubCategoriesPath: 'categories.json',
+  githubBundlePath: 'bundle.json',
 };
 
 export const initialPurchases: PurchaseRecord[] = [
@@ -75,223 +81,8 @@ export const initialPurchases: PurchaseRecord[] = [
   },
 ];
 
-const initialProducts: Product[] = [
-  {
-    id: 'prod-1',
-    name: 'তীর সয়াবিন তেল (৫ লিটার)',
-    banglaName: 'তীর সয়াবিন তেল (৫ লিটার বোতল)',
-    category: 'তেল ও ঘি',
-    barcode: '89411001',
-    purchasePrice: 820,
-    sellingPrice: 890,
-    stockQty: 18,
-    minStockAlert: 5,
-    unit: 'লিটার',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-2',
-    name: 'মিনিকেট প্রিমিয়াম চাল (২৫ কেজি বস্তা)',
-    banglaName: 'মিনিকেট প্রিমিয়াম চাল (২৫ কেজি)',
-    category: 'চাল ও ডাল',
-    barcode: '89411002',
-    purchasePrice: 1650,
-    sellingPrice: 1820,
-    stockQty: 14,
-    minStockAlert: 4,
-    unit: 'বস্তা',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-3',
-    name: 'দেশি চিনি (১ কেজি)',
-    banglaName: 'সাদা চিনি (১ কেজি প্যাকেট)',
-    category: 'মুদি সামগ্রী',
-    barcode: '89411003',
-    purchasePrice: 125,
-    sellingPrice: 140,
-    stockQty: 45,
-    minStockAlert: 10,
-    unit: 'কেজি',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-4',
-    name: 'দেশি মসুর ডাল (১ কেজি)',
-    banglaName: 'চিকন মসুর ডাল (১ কেজি)',
-    category: 'চাল ও ডাল',
-    barcode: '89411004',
-    purchasePrice: 130,
-    sellingPrice: 155,
-    stockQty: 30,
-    minStockAlert: 8,
-    unit: 'কেজি',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-5',
-    name: 'লাক্স বিউটি সাবান ১০০ গ্রাম',
-    banglaName: 'লাক্স সাবান ১০০ গ্রাম (গোলাপ)',
-    category: 'প্রসাধন ও সাবান',
-    barcode: '89411005',
-    purchasePrice: 48,
-    sellingPrice: 58,
-    stockQty: 3,
-    minStockAlert: 10,
-    unit: 'পিস',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-6',
-    name: 'ক্লোজআপ ডিপ একশন টুথপেস্ট ১৫০ গ্রাম',
-    banglaName: 'ক্লোজআপ টুথপেস্ট ১৫০ গ্রাম',
-    category: 'প্রসাধন ও সাবান',
-    barcode: '89411006',
-    purchasePrice: 110,
-    sellingPrice: 135,
-    stockQty: 24,
-    minStockAlert: 6,
-    unit: 'পিস',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-7',
-    name: 'ইস্পাহানি মির্জাপুর চা ৪০০ গ্রাম',
-    banglaName: 'মির্জাপুর চা পাতা ৪০০ গ্রাম',
-    category: 'চা ও কফি',
-    barcode: '89411007',
-    purchasePrice: 215,
-    sellingPrice: 250,
-    stockQty: 16,
-    minStockAlert: 5,
-    unit: 'প্যাকেট',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-8',
-    name: 'ডিপ্লোমা ফুল ক্রিম গুঁড়ো দুধ ৫০০ গ্রাম',
-    banglaName: 'ডিপ্লোমা গুঁড়ো দুধ ৫০০ গ্রাম',
-    category: 'দুগ্ধজাত',
-    barcode: '89411008',
-    purchasePrice: 420,
-    sellingPrice: 480,
-    stockQty: 10,
-    minStockAlert: 4,
-    unit: 'প্যাকেট',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-9',
-    name: 'তীর ফ্রেশ আটা (২ কেজি)',
-    banglaName: 'প্যাকেট আটা ২ কেজি',
-    category: 'মুদি সামগ্রী',
-    barcode: '89411009',
-    purchasePrice: 110,
-    sellingPrice: 125,
-    stockQty: 28,
-    minStockAlert: 6,
-    unit: 'প্যাকেট',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-10',
-    name: 'ফার্মের লাল ডিম (১ ডজন)',
-    banglaName: 'লাল ডিম (১২ পিস)',
-    category: 'মুদি সামগ্রী',
-    barcode: '89411010',
-    purchasePrice: 135,
-    sellingPrice: 150,
-    stockQty: 35,
-    minStockAlert: 10,
-    unit: 'ডজন',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-hijama-pen',
-    name: 'হিজামা পেন',
-    banglaName: 'প্রফেশনাল হিজামা ল্যান্সিং পেন',
-    category: 'হিজামা সামগ্রী',
-    barcode: '89412001',
-    purchasePrice: 190,
-    sellingPrice: 290,
-    stockQty: 40,
-    minStockAlert: 5,
-    unit: 'পিস',
-    defaultDeliveryCharge: 130,
-    weightKg: 0.1,
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-needle-box',
-    name: 'নিডেল বক্স',
-    banglaName: 'হিজামা ডিসপোজেবল নিডেল (১০০ পিস বক্স)',
-    category: 'হিজামা সামগ্রী',
-    barcode: '89412002',
-    purchasePrice: 65,
-    sellingPrice: 110,
-    stockQty: 50,
-    minStockAlert: 10,
-    unit: 'বক্স',
-    defaultDeliveryCharge: 130,
-    weightKg: 0.15,
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod-hijama-32cup',
-    name: 'হিজামা ৩২ কাপ সেট',
-    banglaName: 'প্রিমিয়াম কোয়ালিটি ৩২ কাপ হিজামা কিট',
-    category: 'হিজামা সামগ্রী',
-    barcode: '89412003',
-    purchasePrice: 1050,
-    sellingPrice: 1430,
-    stockQty: 20,
-    minStockAlert: 4,
-    unit: 'পিস',
-    defaultDeliveryCharge: 130,
-    weightKg: 1.2,
-    updatedAt: new Date().toISOString(),
-  }
-];
-
-export const initialBundles: ProductBundle[] = [
-  {
-    id: 'bundle-hijama-32-full',
-    name: 'হিজামা ৩২ কাপ ফুল সেট',
-    category: 'হিজামা সামগ্রী',
-    description: 'হিজামা ৩২ কাপ সেট + হিজামা পেন + নিডেল বক্স কম্বো প্যাকেজ',
-    bundlePrice: 1790,
-    defaultDeliveryCharge: 130,
-    weightKg: 1.45,
-    items: [
-      {
-        productId: 'prod-hijama-pen',
-        productName: 'হিজামা পেন',
-        originalSellingPrice: 290,
-        bundleSellingPrice: 280,
-        quantity: 1,
-        unit: 'পিস',
-      },
-      {
-        productId: 'prod-needle-box',
-        productName: 'নিডেল বক্স',
-        originalSellingPrice: 110,
-        bundleSellingPrice: 100,
-        quantity: 1,
-        unit: 'বক্স',
-      },
-      {
-        productId: 'prod-hijama-32cup',
-        productName: 'হিজামা ৩২ কাপ সেট',
-        originalSellingPrice: 1430,
-        bundleSellingPrice: 1410,
-        quantity: 1,
-        unit: 'পিস',
-      },
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-];
+export const initialProducts: Product[] = seedProducts;
+export const initialBundles: ProductBundle[] = seedBundles;
 
 const initialCustomers: Customer[] = [
   {
@@ -543,16 +334,38 @@ export const loadAppState = (): AppStateData => {
       courierSecretKey: (parsed.settings?.courierSecretKey || '').trim() || defaultSettings.courierSecretKey,
     };
 
-    // Ensure initial Hijama products exist in products list
+    // Ensure catalog products exist in products list
     let existingProducts: Product[] = parsed.products || initialProducts;
+    // Filter out obsolete dummy grocery products
+    existingProducts = existingProducts.filter(p => !p.id.startsWith('prod-'));
     const existingIds = new Set(existingProducts.map(p => p.id));
     const missingInitialProducts = initialProducts.filter(p => !existingIds.has(p.id));
     if (missingInitialProducts.length > 0) {
       existingProducts = [...existingProducts, ...missingInitialProducts];
     }
+    // Enrich with seed details (images, descriptions, delivery rates)
+    existingProducts = existingProducts.map(p => {
+      const seed = initialProducts.find(s => s.id === p.id);
+      if (seed) {
+        return {
+          ...seed,
+          ...p,
+          pdId: p.pdId !== undefined ? p.pdId : seed.pdId,
+          regularPrice: p.regularPrice !== undefined ? p.regularPrice : seed.regularPrice,
+          imageUrl: p.imageUrl || seed.imageUrl,
+          videoUrl: p.videoUrl || seed.videoUrl,
+          description: p.description || seed.description,
+          deliveryDhaka: p.deliveryDhaka || seed.deliveryDhaka,
+          deliverySubDhaka: p.deliverySubDhaka || seed.deliverySubDhaka,
+          deliveryOutside: p.deliveryOutside || seed.deliveryOutside,
+          searchKeywords: p.searchKeywords || seed.searchKeywords,
+        };
+      }
+      return p;
+    });
 
     const loadedBundles: ProductBundle[] = 
-      parsed.bundles && parsed.bundles.length > 0 
+      parsed.bundles && parsed.bundles.length > 0 && parsed.bundles.some((b: any) => b.bundleId)
         ? parsed.bundles 
         : initialBundles;
 

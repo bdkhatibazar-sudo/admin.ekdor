@@ -77,6 +77,92 @@ app.all('/api/steadfast/*', async (req, res) => {
   }
 });
 
+// GitHub Customer Site Sync Proxy Route
+app.post('/api/github/sync', async (req, res) => {
+  try {
+    const { repo, token, branch = 'main', commitMessage, files } = req.body;
+    if (!repo || !token || !Array.isArray(files)) {
+      return res.status(400).json({ error: 'Missing required parameters: repo, token, files' });
+    }
+
+    const cleanRepo = repo.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+    const results = [];
+
+    const headers: Record<string, string> = {
+      'Accept': 'application/vnd.github.v3+json',
+      'Authorization': `Bearer ${token.trim()}`,
+      'User-Agent': 'Ekdor-Admin-POS',
+      'Content-Type': 'application/json',
+    };
+
+    for (const file of files) {
+      const filePath = file.path;
+      const contentStr = file.content;
+      const apiUrl = `https://api.github.com/repos/${cleanRepo}/contents/${filePath}`;
+
+      let existingSha: string | undefined = undefined;
+      try {
+        const getRes = await fetch(`${apiUrl}?ref=${encodeURIComponent(branch)}`, {
+          method: 'GET',
+          headers,
+        });
+        if (getRes.ok) {
+          const getData = await getRes.json();
+          existingSha = getData.sha;
+        }
+      } catch (err) {
+        console.warn(`Error getting file sha for ${filePath}:`, err);
+      }
+
+      const base64Content = Buffer.from(contentStr, 'utf-8').toString('base64');
+      const putBody: any = {
+        message: commitMessage || `Update ${filePath} from Ekdor Admin POS`,
+        content: base64Content,
+        branch,
+      };
+      if (existingSha) {
+        putBody.sha = existingSha;
+      }
+
+      const putRes = await fetch(apiUrl, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(putBody),
+      });
+
+      if (!putRes.ok) {
+        const errData = await putRes.json().catch(() => ({ message: putRes.statusText }));
+        results.push({
+          filename: filePath,
+          success: false,
+          message: errData.message || `HTTP ${putRes.status}`,
+        });
+      } else {
+        const resData = await putRes.json();
+        results.push({
+          filename: filePath,
+          success: true,
+          message: 'সফলভাবে পুশ হয়েছে',
+          sha: resData.content?.sha,
+          htmlUrl: resData.content?.html_url,
+        });
+      }
+    }
+
+    const allSuccess = results.every((r) => r.success);
+    res.json({
+      success: allSuccess,
+      message: allSuccess
+        ? '৩টি ফাইলই (products.json, categories.json, bundle.json) সফলভাবে গিটহাবে আপডেট হয়েছে!'
+        : 'কিছু ফাইল আপডেট করতে সমস্যা হয়েছে।',
+      results,
+    });
+  } catch (error: any) {
+    console.error('GitHub Sync error:', error);
+    res.status(500).json({ error: error.message || 'GitHub Sync failed' });
+  }
+});
+
 // User Sync API
 app.post('/api/auth/sync-user', requireAuth, async (req: AuthRequest, res) => {
   try {
@@ -129,7 +215,7 @@ app.get('/api/health', (req, res) => {
 async function setupViteOrStatic() {
   const distPath = path.resolve(__dirname, 'dist');
   const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
-  const isProd = process.env.NODE_ENV === 'production' || hasDist;
+  const isProd = process.env.NODE_ENV === 'production' && hasDist;
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');

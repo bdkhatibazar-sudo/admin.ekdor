@@ -32,6 +32,7 @@ import { PurchaseStockIn } from './components/PurchaseStockIn';
 import { BackupAndSettings } from './components/BackupAndSettings';
 import { ReceiptA5 } from './components/ReceiptA5';
 import { SaleSuccessView } from './components/SaleSuccessView';
+import { CustomerWebsiteSyncModal } from './components/CustomerWebsiteSyncModal';
 
 // Icons
 import { 
@@ -61,7 +62,8 @@ import {
   X,
   HardDrive,
   ChevronRight,
-  Truck
+  Truck,
+  Globe
 } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 
@@ -74,6 +76,7 @@ export default function App() {
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [isWebsiteSyncOpen, setIsWebsiteSyncOpen] = useState(false);
 
   const handleStartEditOrder = (order: Order) => {
     setEditingOrder(order);
@@ -1054,6 +1057,17 @@ export default function App() {
               <span className="lg:hidden text-[11px]">ফ্রি খাতা</span>
             </div>
 
+            {/* Quick Customer Website Sync Button */}
+            <button
+              id="nav-quick-website-sync-btn"
+              onClick={() => setIsWebsiteSyncOpen(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+              title="কাস্টমার ওয়েবসাইট ekdor.net এ পণ্য, ক্যাটাগরি ও বান্ডেল সিঙ্ক করুন"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-300" />
+              <span>ওয়েবসাইট সিঙ্ক</span>
+            </button>
+
             {/* Quick POS Button */}
             <button
               id="nav-quick-pos-btn"
@@ -1296,6 +1310,7 @@ export default function App() {
             onAddBundle={handleAddBundle}
             onUpdateBundle={handleUpdateBundle}
             onDeleteBundle={handleDeleteBundle}
+            onOpenWebsiteSync={() => setIsWebsiteSyncOpen(true)}
           />
         )}
 
@@ -1431,6 +1446,16 @@ export default function App() {
           {appState.settings.storeName} • সম্পূর্ণ অফলাইন ও দ্রুতগতির ক্যাশ মেমো এবং দোকান খাতা সফটওয়্যার
         </p>
       </footer>
+
+      {/* Customer Website (ekdor.net) Sync Modal */}
+      <CustomerWebsiteSyncModal
+        isOpen={isWebsiteSyncOpen}
+        onClose={() => setIsWebsiteSyncOpen(false)}
+        products={appState.products}
+        bundles={appState.bundles || []}
+        settings={appState.settings}
+        onUpdateSettings={handleUpdateSettings}
+      />
     </div>
   );
 }

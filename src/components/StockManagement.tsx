@@ -20,7 +20,8 @@ import {
   Truck,
   Sparkles,
   TrendingDown,
-  Gift
+  Gift,
+  Globe
 } from 'lucide-react';
 
 interface StockManagementProps {
@@ -32,6 +33,7 @@ interface StockManagementProps {
   onAddBundle?: (bundle: ProductBundle) => void;
   onUpdateBundle?: (bundle: ProductBundle) => void;
   onDeleteBundle?: (bundleId: string) => void;
+  onOpenWebsiteSync?: () => void;
 }
 
 const unitOptions: UnitType[] = [
@@ -55,6 +57,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   onAddBundle,
   onUpdateBundle,
   onDeleteBundle,
+  onOpenWebsiteSync,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'products' | 'bundles'>('products');
   const [searchTerm, setSearchTerm] = useState('');
@@ -110,14 +113,25 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   // Form Fields
   const [name, setName] = useState('');
   const [banglaName, setBanglaName] = useState('');
-  const [category, setCategory] = useState('মুদি সামগ্রী');
+  const [category, setCategory] = useState('হিজামা');
   const [barcode, setBarcode] = useState('');
   const [purchasePrice, setPurchasePrice] = useState<number>(0);
   const [sellingPrice, setSellingPrice] = useState<number>(0);
+  const [regularPrice, setRegularPrice] = useState<number>(0);
   const [stockQty, setStockQty] = useState<number>(0);
   const [minStockAlert, setMinStockAlert] = useState<number>(5);
   const [unit, setUnit] = useState<UnitType>('পিস');
-  const [defaultDeliveryCharge, setDefaultDeliveryCharge] = useState<number>(130);
+  const [defaultDeliveryCharge, setDefaultDeliveryCharge] = useState<number>(70);
+  const [deliveryDhaka, setDeliveryDhaka] = useState<number>(70);
+  const [deliverySubDhaka, setDeliverySubDhaka] = useState<number>(100);
+  const [deliveryOutside, setDeliveryOutside] = useState<number>(130);
+  const [imageUrl, setImageUrl] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [description, setDescription] = useState('');
+  const [searchKeywords, setSearchKeywords] = useState('');
+  const [isActive, setIsActive] = useState(true);
+  const [pdId, setPdId] = useState<number | string>('');
+  const [serialNo, setSerialNo] = useState<number>(0);
   const [weightKg, setWeightKg] = useState<number>(0);
 
   // Quick adjust modal
@@ -181,14 +195,25 @@ export const StockManagement: React.FC<StockManagementProps> = ({
     setEditingProductId(null);
     setName('');
     setBanglaName('');
-    setCategory('মুদি সামগ্রী');
+    setCategory('হিজামা');
     setBarcode('');
     setPurchasePrice(0);
     setSellingPrice(0);
+    setRegularPrice(0);
     setStockQty(10);
     setMinStockAlert(5);
     setUnit('পিস');
-    setDefaultDeliveryCharge(130);
+    setDefaultDeliveryCharge(70);
+    setDeliveryDhaka(70);
+    setDeliverySubDhaka(100);
+    setDeliveryOutside(130);
+    setImageUrl('');
+    setVideoUrl('');
+    setDescription('');
+    setSearchKeywords('');
+    setIsActive(true);
+    setPdId('');
+    setSerialNo(products.length + 1);
     setWeightKg(0);
     setIsModalOpen(true);
   };
@@ -202,10 +227,21 @@ export const StockManagement: React.FC<StockManagementProps> = ({
     setBarcode(p.barcode || '');
     setPurchasePrice(p.purchasePrice);
     setSellingPrice(p.sellingPrice);
+    setRegularPrice(p.regularPrice !== undefined ? p.regularPrice : p.sellingPrice);
     setStockQty(p.stockQty);
     setMinStockAlert(p.minStockAlert);
     setUnit(p.unit);
-    setDefaultDeliveryCharge(p.defaultDeliveryCharge !== undefined ? p.defaultDeliveryCharge : 130);
+    setDefaultDeliveryCharge(p.defaultDeliveryCharge !== undefined ? p.defaultDeliveryCharge : 70);
+    setDeliveryDhaka(p.deliveryDhaka !== undefined ? p.deliveryDhaka : 70);
+    setDeliverySubDhaka(p.deliverySubDhaka !== undefined ? p.deliverySubDhaka : 100);
+    setDeliveryOutside(p.deliveryOutside !== undefined ? p.deliveryOutside : 130);
+    setImageUrl(p.imageUrl || '');
+    setVideoUrl(p.videoUrl || '');
+    setDescription(p.description || '');
+    setSearchKeywords(p.searchKeywords || '');
+    setIsActive(p.isActive !== false);
+    setPdId(p.pdId !== undefined ? p.pdId : p.id);
+    setSerialNo(p.serialNo || 0);
     setWeightKg(p.weightKg || 0);
     setIsModalOpen(true);
   };
@@ -226,33 +262,56 @@ export const StockManagement: React.FC<StockManagementProps> = ({
     if (editingProductId) {
       const updated: Product = {
         id: editingProductId,
+        pdId: pdId !== '' ? pdId : editingProductId,
+        serialNo: Number(serialNo) > 0 ? Number(serialNo) : undefined,
         name: name.trim(),
         banglaName: banglaName.trim() || undefined,
         category: category.trim() || 'সাধারণ',
         barcode: barcode.trim() || undefined,
         purchasePrice: Number(purchasePrice) || 0,
         sellingPrice: Number(sellingPrice) || 0,
+        regularPrice: Number(regularPrice) > 0 ? Number(regularPrice) : Number(sellingPrice),
         stockQty: Number(stockQty) || 0,
         minStockAlert: Number(minStockAlert) || 5,
         unit,
-        defaultDeliveryCharge: Number(defaultDeliveryCharge) >= 0 ? Number(defaultDeliveryCharge) : 130,
+        defaultDeliveryCharge: Number(deliveryDhaka) || Number(defaultDeliveryCharge) || 70,
+        deliveryDhaka: Number(deliveryDhaka) || 70,
+        deliverySubDhaka: Number(deliverySubDhaka) || 100,
+        deliveryOutside: Number(deliveryOutside) || 130,
+        imageUrl: imageUrl.trim() || undefined,
+        videoUrl: videoUrl.trim() || undefined,
+        description: description.trim() || undefined,
+        searchKeywords: searchKeywords.trim() || undefined,
+        isActive,
         weightKg: Number(weightKg) > 0 ? Number(weightKg) : undefined,
         updatedAt: new Date().toISOString(),
       };
       onUpdateProduct(updated);
     } else {
+      const newProdId = pdId !== '' ? String(pdId) : String(Date.now());
       const newProd: Product = {
-        id: `prod-${Date.now()}`,
+        id: newProdId,
+        pdId: pdId !== '' ? pdId : newProdId,
+        serialNo: Number(serialNo) > 0 ? Number(serialNo) : products.length + 1,
         name: name.trim(),
         banglaName: banglaName.trim() || undefined,
         category: category.trim() || 'সাধারণ',
         barcode: barcode.trim() || undefined,
         purchasePrice: Number(purchasePrice) || 0,
         sellingPrice: Number(sellingPrice) || 0,
+        regularPrice: Number(regularPrice) > 0 ? Number(regularPrice) : Number(sellingPrice),
         stockQty: Number(stockQty) || 0,
         minStockAlert: Number(minStockAlert) || 5,
         unit,
-        defaultDeliveryCharge: Number(defaultDeliveryCharge) >= 0 ? Number(defaultDeliveryCharge) : 130,
+        defaultDeliveryCharge: Number(deliveryDhaka) || Number(defaultDeliveryCharge) || 70,
+        deliveryDhaka: Number(deliveryDhaka) || 70,
+        deliverySubDhaka: Number(deliverySubDhaka) || 100,
+        deliveryOutside: Number(deliveryOutside) || 130,
+        imageUrl: imageUrl.trim() || undefined,
+        videoUrl: videoUrl.trim() || undefined,
+        description: description.trim() || undefined,
+        searchKeywords: searchKeywords.trim() || undefined,
+        isActive,
         weightKg: Number(weightKg) > 0 ? Number(weightKg) : undefined,
         updatedAt: new Date().toISOString(),
       };
@@ -505,11 +564,24 @@ export const StockManagement: React.FC<StockManagementProps> = ({
             </button>
           </div>
 
+          {/* Website Sync Button */}
+          {onOpenWebsiteSync && (
+            <button
+              id="btn-website-sync"
+              onClick={onOpenWebsiteSync}
+              className="px-3.5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-bold text-xs sm:text-sm rounded-lg shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              title="কাস্টমার ওয়েবসাইট ekdor.net এ পণ্য, ক্যাটাগরি ও বান্ডেল সিঙ্ক করুন"
+            >
+              <Globe className="w-4 h-4 text-emerald-300" />
+              <span>🌐 ওয়েবসাইট সিঙ্ক</span>
+            </button>
+          )}
+
           {/* Add Product Button */}
           <button
             id="btn-add-product"
             onClick={handleOpenAddModal}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-lg shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-lg shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>নতুন পণ্য যোগ করুন</span>
@@ -1168,10 +1240,10 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    ক্রয়মূল্য (টাকা) <span className="text-rose-500">*</span>
+                    ক্রয়মূল্য <span className="text-rose-500">*</span>
                   </label>
                   <MoneyInput
                     id="input-product-purchase-price"
@@ -1185,7 +1257,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    বিক্রয়মূল্য (টাকা) <span className="text-rose-500">*</span>
+                    বিক্রি মূল্য <span className="text-rose-500">*</span>
                   </label>
                   <MoneyInput
                     id="input-product-selling-price"
@@ -1195,6 +1267,19 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                     onChange={setSellingPrice}
                     placeholder="0"
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    রেগুলার দর (ছাড়ের পূর্বে)
+                  </label>
+                  <MoneyInput
+                    id="input-product-regular-price"
+                    min={0}
+                    value={regularPrice}
+                    onChange={setRegularPrice}
+                    placeholder="যেমন 750"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-600"
                   />
                 </div>
               </div>
@@ -1224,52 +1309,153 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">বারকোড / কোড (ঐচ্ছিক)</label>
-                <input
-                  type="text"
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  placeholder="বারকোড স্ক্যানার বা কোড..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              {/* Delivery Charge & Weight for COD Courier */}
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
-                <div className="flex items-center gap-1.5 text-blue-900 font-bold text-xs">
-                  <Truck className="w-3.5 h-3.5 text-blue-600" />
-                  <span>কুরিয়ার ও সিওডি ডেলিভারি হিসাব (ঐচ্ছিক)</span>
+              {/* Website Settings Section */}
+              <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                  <div className="flex items-center gap-1.5 text-emerald-950 font-bold text-xs">
+                    <Globe className="w-4 h-4 text-emerald-700" />
+                    <span>🌐 কাস্টমার ওয়েবসাইট সেটিংস (ekdor.net)</span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-emerald-900">
+                    <input
+                      type="checkbox"
+                      checked={isActive}
+                      onChange={(e) => setIsActive(e.target.checked)}
+                      className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span>ওয়েবসাইটে লাইভ দেখাবে</span>
+                  </label>
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      আনুমানিক ডেলিভারি চার্জ (টাকা)
+                      ছবির লিংক (Image URL)
                     </label>
-                    <MoneyInput
-                      id="input-product-delivery-charge"
-                      min={0}
-                      value={defaultDeliveryCharge}
-                      onChange={setDefaultDeliveryCharge}
-                      placeholder="130"
-                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                    <input
+                      type="text"
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      placeholder="https://...image.webp"
+                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                     />
-                    <span className="text-[10px] text-slate-500">গড়ে ১৩০ টাকা বা নির্ধারিত</span>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      পণ্যের ওজন (কেজি)
+                      ভিডিওর লিংক (YouTube URL)
                     </label>
-                    <MoneyInput
-                      id="input-product-weight-kg"
-                      min={0}
-                      value={weightKg}
-                      onChange={setWeightKg}
-                      placeholder="0.5"
-                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                    <input
+                      type="text"
+                      value={videoUrl}
+                      onChange={(e) => setVideoUrl(e.target.value)}
+                      placeholder="https://youtu.be/..."
+                      className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                     />
-                    <span className="text-[10px] text-slate-500">কুরিয়ার ওজন স্ল্যাব চার্জের জন্য</span>
                   </div>
+                </div>
+
+                {imageUrl && (
+                  <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200">
+                    <img 
+                      src={imageUrl} 
+                      alt="Product Preview" 
+                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0"
+                      onError={(e) => { (e.target as any).style.display = 'none'; }}
+                    />
+                    <span className="text-[11px] text-slate-500 truncate">ছবির প্রিভিউ</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    পণ্যের বিস্তারিত বিবরণ / বর্ণনা
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="পণ্য সম্পর্কে বিস্তারিত তথ্য লিখুন..."
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* 3 Zone Delivery Charges */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    এলাকাভিত্তিক কুরিয়ার ডেলিভারি চার্জ (টাকা)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5">ঢাকা সিটি</span>
+                      <MoneyInput
+                        id="input-delivery-dhaka"
+                        min={0}
+                        value={deliveryDhaka}
+                        onChange={setDeliveryDhaka}
+                        placeholder="70"
+                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs bg-white font-semibold text-center"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5">পার্শ্ববর্তী</span>
+                      <MoneyInput
+                        id="input-delivery-sub-dhaka"
+                        min={0}
+                        value={deliverySubDhaka}
+                        onChange={setDeliverySubDhaka}
+                        placeholder="100"
+                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs bg-white font-semibold text-center"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5">ঢাকার বাইরে</span>
+                      <MoneyInput
+                        id="input-delivery-outside"
+                        min={0}
+                        value={deliveryOutside}
+                        onChange={setDeliveryOutside}
+                        placeholder="130"
+                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs bg-white font-semibold text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    সার্চ কি-ওয়ার্ড (কমা দিয়ে আলাদা করুন)
+                  </label>
+                  <input
+                    type="text"
+                    value={searchKeywords}
+                    onChange={(e) => setSearchKeywords(e.target.value)}
+                    placeholder="যেমন: hijama set, ১২ কাপ হিজামা..."
+                    className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">বারকোড / কোড (ঐচ্ছিক)</label>
+                  <input
+                    type="text"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    placeholder="বারকোড স্ক্যানার বা কোড..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">ওজন (কেজি)</label>
+                  <MoneyInput
+                    id="input-product-weight-kg"
+                    min={0}
+                    value={weightKg}
+                    onChange={setWeightKg}
+                    placeholder="0.5"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
                 </div>
               </div>
 
