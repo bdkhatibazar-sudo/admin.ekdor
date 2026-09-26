@@ -573,7 +573,7 @@ export const BundleModal: React.FC<BundleModalProps> = ({
                               handleUpdateItem(idx, { bundleSellingPrice: val })
                             }
                             className={`w-full px-2 py-1 rounded-md text-right font-bold text-xs focus:bg-white focus:ring-1 ${
-                              (item.bundleSellingPrice ?? 0) < (prod?.purchasePrice || 0)
+                              item.bundleSellingPrice < (prod?.purchasePrice || 0)
                                 ? 'bg-rose-50 border border-rose-300 text-rose-800 focus:ring-rose-500'
                                 : 'bg-teal-50/50 border border-teal-300 text-teal-900 focus:ring-teal-500'
                             }`}

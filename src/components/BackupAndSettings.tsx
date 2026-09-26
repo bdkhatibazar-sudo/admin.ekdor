@@ -234,7 +234,7 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
   };
 
   return (
-    <div id="backup-settings-view" className="space-y-6 w-full max-w-7xl mx-auto pb-10">
+    <div id="backup-settings-view" className="space-y-6 max-w-5xl mx-auto pb-10">
       {/* Top Banner: 100% Free & Offline Ready Guarantee */}
       <div className="bg-gradient-to-r from-emerald-700 to-teal-800 text-white p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
@@ -686,10 +686,7 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
                     প্রধান মোবাইল নম্বর <span className="text-rose-500">*</span>
                   </label>
                   <input
-                    type="tel"
-                    inputMode="tel"
-                    pattern="[0-9+]*"
-                    autoComplete="tel"
+                    type="text"
                     required
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
@@ -702,10 +699,7 @@ export const BackupAndSettings: React.FC<BackupAndSettingsProps> = ({
                     বিকল্প মোবাইল (ঐচ্ছিক)
                   </label>
                   <input
-                    type="tel"
-                    inputMode="tel"
-                    pattern="[0-9+]*"
-                    autoComplete="tel"
+                    type="text"
                     value={formData.alternatePhone || ''}
                     onChange={(e) => setFormData({ ...formData, alternatePhone: e.target.value })}
                     placeholder="01812-345678"

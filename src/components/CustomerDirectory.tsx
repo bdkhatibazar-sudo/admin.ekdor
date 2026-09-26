@@ -324,7 +324,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
         <div className={`lg:col-span-4 space-y-3 ${mobileShowDetail ? 'hidden lg:block' : 'block'}`}>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3 space-y-3">
             
-            {/* Search Input & Add Button */}
+            {/* Search Input & Add Customer */}
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <input
@@ -339,19 +339,20 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
+
               <button
                 type="button"
                 onClick={handleOpenAddCustomer}
-                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition shadow-xs cursor-pointer shrink-0"
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs shrink-0 cursor-pointer"
                 title="নতুন গ্রাহক যোগ করুন"
               >
-                <UserPlus className="w-3.5 h-3.5" />
+                <UserPlus className="w-4 h-4" />
                 <span className="hidden sm:inline">নতুন গ্রাহক</span>
               </button>
             </div>
@@ -739,7 +740,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
 
                               <td className="py-2.5 px-3 text-right font-medium">
                                 <span className="text-emerald-700">{formatCurrency(ord.paidAmount)}</span>
-                                {(ord.codAmount ?? 0) > 0 ? (
+                                {ord.codAmount > 0 ? (
                                   <span className="block text-[10px] text-blue-700 font-bold">
                                     COD: {formatCurrency(ord.codAmount)}
                                   </span>

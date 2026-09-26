@@ -928,7 +928,7 @@ export default function App() {
       {/* APP TOP NAVBAR (Hidden during printing) */}
       <header className="no-print bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
         {/* Brand & Store Bar */}
-        <div className="w-full max-w-[1700px] 2xl:max-w-[1920px] mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           {/* Left: Mobile Hamburger Menu & Logo */}
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             {/* Mobile Menu Toggle Button */}
@@ -1070,7 +1070,7 @@ export default function App() {
         </div>
 
         {/* Navigation Tabs Bar (Horizontal Swipeable on Mobile, Clean on Desktop) */}
-        <div className="w-full max-w-[1700px] 2xl:max-w-[1920px] mx-auto px-2 sm:px-6 flex items-center gap-1 overflow-x-auto scrollbar-none border-t border-slate-100 py-1.5 text-xs sm:text-sm font-semibold touch-pan-x">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 flex items-center gap-1 overflow-x-auto scrollbar-none border-t border-slate-100 py-1.5 text-xs sm:text-sm font-semibold touch-pan-x">
           {[
             { id: 'pos', label: 'বিক্রয় কাউন্টার (POS)', icon: ShoppingCart },
             { id: 'cash_register', label: 'মোট ব্যালেন্স ও হিসাব', icon: Wallet },
@@ -1228,7 +1228,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 w-full max-w-[1700px] 2xl:max-w-[1920px] mx-auto p-3 sm:p-5">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5">
         {/* TAB 1: POS COUNTER */}
         {activeTab === 'pos' && (
           <PosCounter

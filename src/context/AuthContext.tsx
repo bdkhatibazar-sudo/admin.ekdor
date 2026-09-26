@@ -1,107 +1,136 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { auth, googleAuthProvider } from '../lib/firebase';
 import { AppStateData } from '../types';
 
-export interface AuthUser {
-  uid: string;
-  email?: string;
-  displayName?: string;
-  photoURL?: string;
-}
-
 interface AuthContextType {
-  currentUser: AuthUser | null;
+  currentUser: User | null;
+  loading: boolean;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
-  cloudSyncStatus: 'synced' | 'syncing' | 'offline' | 'error' | 'idle';
-  lastSyncedAt: Date | string | null;
+  getIdToken: () => Promise<string | null>;
+  cloudSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';
+  lastSyncedAt: Date | null;
+  syncError: string | null;
   loadFromCloud: () => Promise<Partial<AppStateData> | null>;
-  saveToCloud: (state: AppStateData) => Promise<boolean>;
+  saveToCloud: (data: AppStateData) => Promise<boolean>;
 }
 
-const defaultContextValue: AuthContextType = {
-  currentUser: null,
-  loginWithGoogle: async () => {},
-  logout: async () => {},
-  cloudSyncStatus: 'offline',
-  lastSyncedAt: null,
-  loadFromCloud: async () => null,
-  saveToCloud: async () => false,
-};
-
-const AuthContext = createContext<AuthContextType>(defaultContextValue);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    try {
-      const stored = localStorage.getItem('ekdor_current_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error' | 'idle'>('idle');
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | string | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      setLoading(false);
+
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          await fetch('/api/auth/sync-user', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              name: user.displayName || 'দোকানদার',
+            }),
+          });
+        } catch (err) {
+          console.error('Error syncing user profile on backend:', err);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const loginWithGoogle = async () => {
-    // Local / Offline mode login simulation
-    const mockUser: AuthUser = {
-      uid: 'user-' + Date.now(),
-      email: 'shopkeeper@ekdor.com',
-      displayName: 'দোকানদার',
-    };
-    setCurrentUser(mockUser);
-    localStorage.setItem('ekdor_current_user', JSON.stringify(mockUser));
+    try {
+      setLoading(true);
+      await signInWithPopup(auth, googleAuthProvider);
+    } catch (err: any) {
+      console.error('Login error:', err);
+      alert('গুগল লগইনে সমস্যা হয়েছে: ' + (err.message || 'অনুগ্রহ করে আবার চেষ্টা করুন'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = async () => {
-    setCurrentUser(null);
-    localStorage.removeItem('ekdor_current_user');
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  const getIdToken = async (): Promise<string | null> => {
+    if (!currentUser) return null;
+    return await currentUser.getIdToken();
   };
 
   const loadFromCloud = async (): Promise<Partial<AppStateData> | null> => {
     if (!currentUser) return null;
-    setCloudSyncStatus('syncing');
     try {
+      setCloudSyncStatus('syncing');
+      setSyncError(null);
+      const token = await currentUser.getIdToken();
       const res = await fetch('/api/store-data', {
         headers: {
-          Authorization: `Bearer ${currentUser.uid}`,
+          Authorization: `Bearer ${token}`,
         },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setCloudSyncStatus('synced');
-        setLastSyncedAt(new Date());
-        return data;
+
+      if (!res.ok) {
+        throw new Error(`Failed to load data: ${res.statusText}`);
       }
-      setCloudSyncStatus('idle');
-      return null;
-    } catch {
-      setCloudSyncStatus('offline');
+
+      const data = await res.json();
+      setCloudSyncStatus('synced');
+      setLastSyncedAt(new Date());
+      return data;
+    } catch (err: any) {
+      console.error('Error loading data from Cloud SQL:', err);
+      setCloudSyncStatus('error');
+      setSyncError(err.message || 'ক্লাউড থেকে ডাটা লোড করা যায়নি');
       return null;
     }
   };
 
-  const saveToCloud = async (state: AppStateData): Promise<boolean> => {
+  const saveToCloud = async (data: AppStateData): Promise<boolean> => {
     if (!currentUser) return false;
-    setCloudSyncStatus('syncing');
     try {
+      setCloudSyncStatus('syncing');
+      setSyncError(null);
+      const token = await currentUser.getIdToken();
       const res = await fetch('/api/store-data/sync', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${currentUser.uid}`,
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(state),
+        body: JSON.stringify(data),
       });
-      if (res.ok) {
-        setCloudSyncStatus('synced');
-        setLastSyncedAt(new Date());
-        return true;
+
+      if (!res.ok) {
+        throw new Error(`Failed to save data: ${res.statusText}`);
       }
+
+      setCloudSyncStatus('synced');
+      setLastSyncedAt(new Date());
+      return true;
+    } catch (err: any) {
+      console.error('Error saving data to Cloud SQL:', err);
       setCloudSyncStatus('error');
-      return false;
-    } catch {
-      setCloudSyncStatus('offline');
+      setSyncError(err.message || 'ক্লাউডে ডাটা সেভ করা যায়নি');
       return false;
     }
   };
@@ -110,10 +139,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         currentUser,
+        loading,
         loginWithGoogle,
         logout,
+        getIdToken,
         cloudSyncStatus,
         lastSyncedAt,
+        syncError,
         loadFromCloud,
         saveToCloud,
       }}
@@ -123,7 +155,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export function useAuth(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  return ctx || defaultContextValue;
-}
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

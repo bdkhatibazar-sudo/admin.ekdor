@@ -4,7 +4,6 @@ import { formatCurrency, formatDateTime, resolveWhatsAppNumber, createWhatsAppUr
 import { MoneyInput } from './MoneyInput';
 import { CourierBatchRemittanceModal } from './CourierBatchRemittanceModal';
 import { CourierRemittanceBatchViewModal } from './CourierRemittanceBatchViewModal';
-import { OrderDetailsModal } from './OrderDetailsModal';
 import { 
   Users, 
   UserPlus, 
@@ -35,10 +34,11 @@ import {
   CheckSquare,
   Square,
   ShoppingCart,
-  Eye,
-  Sparkles,
-  ShoppingBag
+  ShoppingBag,
+  Calendar,
+  Sparkles
 } from 'lucide-react';
+import { OrderDetailsModal } from './OrderDetailsModal';
 
 interface CustomerKhataProps {
   customers: Customer[];
@@ -90,7 +90,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDueOnly, setFilterDueOnly] = useState(true);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [detailsModalOrder, setDetailsModalOrder] = useState<Order | null>(null);
+  const [modalOrder, setModalOrder] = useState<Order | null>(null);
 
   // Add / Edit Customer Modal
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -162,15 +162,15 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
   const customerOrders = useMemo(() => {
     if (!selectedCustomer) return [];
     return orders
-      .filter((o) => o.customerId === selectedCustomer.id || (selectedCustomer.phone && o.customerPhone === selectedCustomer.phone))
-      .sort((a, b) => new Date(b.date || b.createdAt || 0).getTime() - new Date(a.date || a.createdAt || 0).getTime());
+      .filter((o) => o.customerId === selectedCustomer.id || (o.customerPhone && o.customerPhone === selectedCustomer.phone))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, selectedCustomer]);
 
   const customerPayments = useMemo(() => {
     if (!selectedCustomer) return [];
     return duePayments
       .filter((p) => p.customerId === selectedCustomer.id)
-      .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [duePayments, selectedCustomer]);
 
   // --- COD Courier Khata Orders & Metrics ---
@@ -450,6 +450,16 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
     setIsCustomerModalOpen(false);
   };
 
+  // Delete Customer
+  const handleDeleteCustomer = (id: string, customerName: string) => {
+    if (window.confirm(`আপনি কি নিশ্চিত যে '${customerName}' গ্রাহকটিকে মুছে ফেলতে চান?`)) {
+      onDeleteCustomer(id);
+      if (selectedCustomerId === id) {
+        setSelectedCustomerId(null);
+      }
+    }
+  };
+
   // Open Payment Modal
   const handleOpenPayment = (cust: Customer) => {
     setPaymentModalCustomer(cust);
@@ -530,10 +540,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
           <button
             type="button"
             id="tab-khata-cod-due"
-            onClick={() => {
-              setKhataMode('cod');
-              setSelectedCustomerId(null);
-            }}
+            onClick={() => setKhataMode('cod')}
             className={`flex-1 sm:flex-initial px-3.5 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
               khataMode === 'cod'
                 ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
@@ -576,45 +583,34 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
       {/* ============================================================== */}
       {khataMode === 'customer' && (
         selectedCustomer ? (
-          <div className="space-y-4">
-            {/* Top Navigation Bar */}
-            <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedCustomerId(null)}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition border border-slate-200 cursor-pointer"
-                  title="বাকীদার তালিকায় ফিরে যান"
-                >
-                  <ArrowLeft className="w-4 h-4 text-slate-600" />
-                  <span>← বাকীদার তালিকায় ফিরুন</span>
-                </button>
-                <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-                <span className="text-xs text-slate-500 hidden sm:inline">গ্রাহক খাতা:</span>
-                <span className="font-bold text-sm text-slate-900">{selectedCustomer.name}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  {selectedCustomer.phone}
+          /* ========================================================== */
+          /* IN-PLACE CUSTOMER 360° PROFILE & PAST ORDERS (গ্রাহক খাতা)  */
+          /* ========================================================== */
+          <div className="space-y-4 animate-in fade-in duration-200">
+            {/* Top Back Navigation Bar */}
+            <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedCustomerId(null)}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+              >
+                <ArrowLeft className="w-4 h-4 text-slate-600" />
+                <span>← সকল বাকিদার তালিকায় ফিরুন</span>
+              </button>
+
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span>গ্রাহক আইডি:</span>
+                <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                  {selectedCustomer.id}
                 </span>
-                {(selectedCustomer.totalDue || 0) > 0 ? (
-                  <span className="bg-rose-100 text-rose-800 border border-rose-200 text-xs px-2.5 py-1 rounded-lg font-bold">
-                    বকেয়া বাকি ৳{selectedCustomer.totalDue}
-                  </span>
-                ) : (
-                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs px-2.5 py-1 rounded-lg font-bold">
-                    পরিশোধিত
-                  </span>
-                )}
               </div>
             </div>
 
-            {/* Profile Card with Information & Actions */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5 space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Profile Summary Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start gap-3.5">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-2xl shadow-sm shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center font-bold text-2xl shadow-sm shrink-0">
                     {selectedCustomer.name.substring(0, 1)}
                   </div>
                   <div>
@@ -637,6 +633,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                         </span>
                       )}
                     </div>
+
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 mt-1">
                       <div className="flex items-center gap-1 font-semibold text-slate-800">
                         <Phone className="w-3.5 h-3.5 text-slate-400" />
@@ -648,12 +645,14 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                           (কল করুন)
                         </a>
                       </div>
+
                       {selectedCustomer.whatsappPhone && (
                         <div className="flex items-center gap-1 font-medium text-emerald-800">
                           <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                           <span>WA: {selectedCustomer.whatsappPhone}</span>
                         </div>
                       )}
+
                       {selectedCustomer.address && (
                         <div className="flex items-center gap-1 text-slate-500">
                           <MapPin className="w-3.5 h-3.5 text-slate-400" />
@@ -661,51 +660,52 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                         </div>
                       )}
                     </div>
+
                     {selectedCustomer.notes && (
-                      <p className="text-xs text-slate-500 italic mt-1.5 bg-slate-50 px-2.5 py-1 rounded-lg inline-block border border-slate-100">
+                      <p className="text-xs text-slate-500 italic mt-1 bg-slate-50 px-2 py-1 rounded-md inline-block">
                         নোট: {selectedCustomer.notes}
                       </p>
                     )}
                   </div>
                 </div>
 
-                {/* Actions: টাকা জমা দেওয়া ও নতুন অর্ডার বাটন */}
+                {/* Actions Bar */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onNavigateToPos) onNavigateToPos(selectedCustomer);
-                    }}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-                    title="এই গ্রাহকের জন্য কাউন্টারে নতুন বিল তৈরি করুন"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    <span>নতুন অর্ডার</span>
-                  </button>
+                  {onNavigateToPos && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToPos(selectedCustomer)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                      title="এই গ্রাহকের জন্য পিওএস কাউন্টারে নতুন বিল তৈরি করুন"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      <span>নতুন অর্ডার</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
                     onClick={() => handleOpenPayment(selectedCustomer)}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-                    title="বাকি টাকা বা জমা গ্রহণ"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                    title="বাকি আদায় বা টাকা জমা গ্রহণ"
                   >
                     <CreditCard className="w-4 h-4" />
-                    <span>টাকা জমা দেওয়া</span>
+                    <span>টাকা জমা নিন</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleWhatsAppReminder(selectedCustomer)}
-                    className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl transition cursor-pointer"
-                    title="হোয়াটসঅ্যাপে তাগাদা পাঠান"
+                    className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl transition cursor-pointer"
+                    title="হোয়াটসঅ্যাপে বাকি তাগাদা পাঠান"
                   >
-                    <MessageCircle className="w-4 h-4" />
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleOpenEditCustomerModal(selectedCustomer)}
-                    className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer border border-slate-200"
+                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer"
                     title="গ্রাহকের তথ্য এডিট করুন"
                   >
                     <Edit2 className="w-4 h-4" />
@@ -713,7 +713,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                 </div>
               </div>
 
-              {/* 4 Financial Stat Cards (সামারী) */}
+              {/* 4 Financial Stat Summary Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                   <span className="text-[11px] font-semibold text-slate-500 block">মোট অর্ডার</span>
@@ -721,18 +721,21 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                     {customerOrders.length} টি
                   </span>
                 </div>
+
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                   <span className="text-[11px] font-semibold text-slate-500 block">মোট কেনাকাটা</span>
                   <span className="text-base sm:text-lg font-bold text-slate-900 mt-0.5 block">
                     {formatCurrency(selectedCustomer.totalPurchased || 0)}
                   </span>
                 </div>
+
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                   <span className="text-[11px] font-semibold text-slate-500 block">মোট পরিশোধ</span>
                   <span className="text-base sm:text-lg font-bold text-emerald-700 mt-0.5 block">
                     {formatCurrency(selectedCustomer.totalPaid || 0)}
                   </span>
                 </div>
+
                 <div className={`p-3 rounded-xl border text-center ${
                   (selectedCustomer.totalDue || 0) > 0
                     ? 'bg-rose-50 border-rose-200 text-rose-800'
@@ -741,10 +744,10 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                     : 'bg-slate-50 border-slate-200 text-slate-700'
                 }`}>
                   <span className="text-[11px] font-bold block">
-                    {(selectedCustomer.totalDue || 0) > 0
-                      ? 'বর্তমান বকেয়া বাকি'
-                      : (selectedCustomer.advanceBalance || 0) > 0
-                      ? 'অতিরিক্ত জমা ব্যালেন্স'
+                    {(selectedCustomer.totalDue || 0) > 0 
+                      ? 'বর্তমান বকেয়া বাকি' 
+                      : (selectedCustomer.advanceBalance || 0) > 0 
+                      ? 'অতিরিক্ত জমা ব্যালেন্স' 
                       : 'বর্তমান হিসাব স্থিতি'}
                   </span>
                   <span className="text-base sm:text-lg font-black mt-0.5 block">
@@ -757,172 +760,160 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                 </div>
               </div>
 
-              {/* Overpayment / Advance Balance Explanation Banner */}
+              {/* Overpayment / Advance Notice */}
               {(selectedCustomer.advanceBalance || 0) > 0 && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-emerald-900">
                   <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-bold">অগ্রিম জমা ব্যালেন্স ব্যবহারের সুবিধা:</p>
+                    <p className="font-bold">অগ্রিম জমা ব্যালেন্স:</p>
                     <p className="text-[11px] text-emerald-800 mt-0.5">
-                      এই গ্রাহকের পূর্বে ৳{selectedCustomer.advanceBalance} টাকা অতিরিক্ত জমা দেওয়া আছে। পরবর্তীতে পিওএস কাউন্টারে নতুন কোনো অর্ডার তৈরি করার সময় এই টাকা স্বয়ংক্রিয়ভাবে বিল থেকে বাদ যাবে।
+                      এই গ্রাহকের ৳{selectedCustomer.advanceBalance} টাকা অতিরিক্ত জমা রয়েছে। পরবর্তীতে পিওএস কাউন্টারে অর্ডার করার সময় এটি স্বয়ংক্রিয়ভাবে সমন্বয় হবে।
                     </p>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Previous Orders Section (পুরাতন অর্ডারগুলো নীচে দেখাক) */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
-                    <Receipt className="w-4 h-4 text-indigo-600" />
-                    <span>পুরাতন অর্ডারের তালিকা ({customerOrders.length}টি)</span>
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    অর্ডারগুলোতে ক্লিক করলে বিস্তারিত মেমো ও রসিদ পপআপ হিসেবে দেখতে পাবেন
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onNavigateToPos) onNavigateToPos(selectedCustomer);
-                  }}
-                  className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold self-start sm:self-auto flex items-center gap-1.5 transition cursor-pointer"
-                >
-                  <ShoppingCart className="w-3.5 h-3.5" />
-                  <span>+ নতুন অর্ডার তৈরি</span>
-                </button>
+            {/* Orders List Underneath (পুরাতন অর্ডারগুলো নীচে দেখাক) */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                  <span>এই গ্রাহকের সকল অর্ডার ও ক্রয়ের তালিকা ({customerOrders.length}টি)</span>
+                </h4>
+                <span className="text-[11px] text-slate-400">বিস্তারিত দেখতে যে কোনো অর্ডারে ক্লিক করুন</span>
               </div>
 
               {customerOrders.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <ShoppingBag className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-xs font-semibold text-slate-600">এই গ্রাহকের কোনো অর্ডার রেকর্ড নেই</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onNavigateToPos) onNavigateToPos(selectedCustomer);
-                    }}
-                    className="mt-2.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
-                  >
-                    <ShoppingCart className="w-3.5 h-3.5" />
-                    <span>প্রথম অর্ডার তৈরি করুন</span>
-                  </button>
+                  <p className="text-xs font-semibold">এই গ্রাহকের কোনো অর্ডার রেকর্ড পাওয়া যায়নি</p>
+                  {onNavigateToPos && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToPos(selectedCustomer)}
+                      className="mt-2.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      <span>প্রথম অর্ডার তৈরি করুন</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                        <tr>
-                          <th className="py-2.5 px-3">চালান #</th>
-                          <th className="py-2.5 px-3">তারিখ</th>
-                          <th className="py-2.5 px-3">পণ্যের বিবরণ</th>
-                          <th className="py-2.5 px-3 text-right">মোট টাকা</th>
-                          <th className="py-2.5 px-3 text-right">পরিশোধ</th>
-                          <th className="py-2.5 px-3 text-center">স্ট্যাটাস</th>
-                          <th className="py-2.5 px-3 text-center">অ্যাকশন</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {customerOrders.map((ord) => {
-                          const itemsSummary = ord.items.map((i) => `${i.productName} (${i.quantity} ${i.unit})`).join(', ');
-                          return (
-                            <tr
-                              key={ord.id}
-                              onClick={() => setDetailsModalOrder(ord)}
-                              className="hover:bg-indigo-50/60 cursor-pointer transition-colors group"
-                            >
-                              <td className="py-2.5 px-3 font-mono font-bold text-indigo-700 group-hover:underline">
-                                #{ord.invoiceNumber}
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
-                                {formatDateTime(ord.date).split(',')[0]}
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-700 max-w-[200px] truncate" title={itemsSummary}>
-                                {itemsSummary || 'পণ্য বিস্তারিত'}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                                {formatCurrency(ord.grandTotal)}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-medium">
-                                <span className="text-emerald-700 font-semibold">{formatCurrency(ord.paidAmount)}</span>
-                                {(ord.codAmount ?? 0) > 0 ? (
-                                  <span className="block text-[10px] text-blue-700 font-bold">
-                                    COD: {formatCurrency(ord.codAmount)}
-                                  </span>
-                                ) : ord.dueAmount > 0 ? (
-                                  <span className="block text-[10px] text-rose-600 font-bold">
-                                    বাকি: {formatCurrency(ord.dueAmount)}
-                                  </span>
-                                ) : null}
-                              </td>
-                              <td className="py-2.5 px-3 text-center">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                  ord.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
-                                  ord.status === 'shipped' ? 'bg-indigo-100 text-indigo-800' :
-                                  ord.status === 'confirmed' ? 'bg-blue-100 text-blue-800' :
-                                  ord.status === 'draft' ? 'bg-amber-100 text-amber-800' :
-                                  ord.status === 'cancelled' ? 'bg-slate-200 text-slate-700' : 'bg-rose-100 text-rose-800'
-                                }`}>
-                                  {ord.status === 'delivered' ? 'ডেলিভার্ড' :
-                                   ord.status === 'shipped' ? 'কুরিয়ারে' :
-                                   ord.status === 'confirmed' ? 'কনফার্ম' :
-                                   ord.status === 'draft' ? 'ড্রাফট' :
-                                   ord.status === 'cancelled' ? 'বাতিল' : 'রিটার্ন'}
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">চালান #</th>
+                        <th className="py-2.5 px-3">তারিখ</th>
+                        <th className="py-2.5 px-3">পণ্যের বিবরণ</th>
+                        <th className="py-2.5 px-3 text-right">মোট টাকা</th>
+                        <th className="py-2.5 px-3 text-right">পরিশোধ</th>
+                        <th className="py-2.5 px-3 text-center">স্ট্যাটাস</th>
+                        <th className="py-2.5 px-3 text-center">অ্যাকশন</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {customerOrders.map((ord) => {
+                        const itemsSummary = ord.items.map((i) => `${i.productName} (${i.quantity} ${i.unit})`).join(', ');
+
+                        return (
+                          <tr
+                            key={ord.id}
+                            onClick={() => setModalOrder(ord)}
+                            className="hover:bg-emerald-50/50 cursor-pointer transition-colors group"
+                            title="অর্ডারের বিস্তারিত পপআপ দেখতে ক্লিক করুন"
+                          >
+                            <td className="py-2.5 px-3 font-mono font-bold text-emerald-800">
+                              #{ord.invoiceNumber}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
+                              {formatDateTime(ord.date).split(',')[0]}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-slate-700 max-w-[200px] truncate" title={itemsSummary}>
+                              {itemsSummary}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                              {formatCurrency(ord.grandTotal)}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right font-medium">
+                              <span className="text-emerald-700">{formatCurrency(ord.paidAmount)}</span>
+                              {ord.codAmount > 0 ? (
+                                <span className="block text-[10px] text-blue-700 font-bold">
+                                  COD: {formatCurrency(ord.codAmount)}
                                 </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  type="button"
-                                  onClick={() => setDetailsModalOrder(ord)}
-                                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 mx-auto transition cursor-pointer"
-                                >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>বিস্তারিত</span>
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                              ) : ord.dueAmount > 0 ? (
+                                <span className="block text-[10px] text-rose-600 font-bold">
+                                  বাকি: {formatCurrency(ord.dueAmount)}
+                                </span>
+                              ) : null}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                ord.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' :
+                                ord.status === 'shipped' ? 'bg-indigo-100 text-indigo-800' :
+                                ord.status === 'confirmed' ? 'bg-blue-100 text-blue-800' :
+                                ord.status === 'draft' ? 'bg-amber-100 text-amber-800' :
+                                ord.status === 'cancelled' ? 'bg-slate-200 text-slate-700' : 'bg-rose-100 text-rose-800'
+                              }`}>
+                                {ord.status === 'delivered' ? 'ডেলিভার্ড' :
+                                 ord.status === 'shipped' ? 'কুরিয়ারে' :
+                                 ord.status === 'confirmed' ? 'কনফার্ম' :
+                                 ord.status === 'draft' ? 'ড্রাফট' :
+                                 ord.status === 'cancelled' ? 'বাতিল' : 'রিটার্ন'}
+                              </span>
+                            </td>
+
+                            <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => setModalOrder(ord)}
+                                className="text-xs font-semibold text-emerald-700 hover:text-emerald-950 group-hover:underline flex items-center justify-center gap-0.5 mx-auto cursor-pointer"
+                              >
+                                <span>বিস্তারিত</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
 
-            {/* Customer Due Payment History Section */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5 space-y-3">
-              <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-emerald-600" />
-                <span>বাকি পরিশোধের ইতিহাস ({customerPayments.length}টি)</span>
-              </h4>
-              {customerPayments.length === 0 ? (
-                <p className="text-xs text-slate-400 italic bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
-                  কোনো বাকি পরিশোধের রেকর্ড পাওয়া যায়নি
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {/* Previous Due Payments History */}
+            {customerPayments.length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+                <h4 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-emerald-600" />
+                  <span>বাকি পরিশোধ ও জমার ইতিহাস ({customerPayments.length}টি)</span>
+                </h4>
+                <div className="space-y-2">
                   {customerPayments.map((p) => (
                     <div
                       key={p.id}
-                      className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 flex items-center justify-between text-xs"
+                      className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-100 flex items-center justify-between text-xs"
                     >
                       <div>
                         <span className="font-bold text-emerald-900 text-sm block">৳{p.amount}</span>
                         <span className="text-[10px] text-slate-500">{formatDateTime(p.date)}</span>
                         {p.note && <p className="text-[11px] text-slate-600 mt-0.5">{p.note}</p>}
                       </div>
-                      <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2.5 py-1 rounded-full font-bold">
                         {p.paymentMethod === 'cash' ? 'ক্যাশ' : p.paymentMethod === 'bkash' ? 'বিকাশ' : p.paymentMethod === 'bank' ? 'ব্যাংক' : 'কিউআর'}
                       </span>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
@@ -989,7 +980,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="গ্রাহকের নাম, মোবাইল বা ঠিকানা..."
+                  placeholder="বাকিদার গ্রাহকের নাম, মোবাইল বা ঠিকানা..."
                   className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50"
                 />
               </div>
@@ -1002,7 +993,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                     onChange={(e) => setFilterDueOnly(e.target.checked)}
                     className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
                   />
-                  <span>শুধু বাকিদার গ্রাহক দেখান</span>
+                  <span>শুধু বাকিদার গ্রাহক দেখান ({customerMetrics.customersWithDue} জন)</span>
                 </label>
               </div>
             </div>
@@ -1026,8 +1017,8 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                       <tr>
                         <td colSpan={6} className="py-12 text-center text-slate-400">
                           <Users className="w-10 h-10 mx-auto text-slate-300 mb-2 opacity-60" />
-                          <p className="font-semibold text-slate-600 text-sm">কোনো গ্রাহক পাওয়া যায়নি</p>
-                          <p className="text-xs text-slate-400 mt-0.5">নতুন গ্রাহক যোগ করতে ওপরের বাটনে চাপুন</p>
+                          <p className="font-semibold text-slate-600 text-sm">কোনো বাকিদার গ্রাহক পাওয়া যায়নি</p>
+                          <p className="text-xs text-slate-400 mt-0.5">সব বকেয়া পরিশোধিত অথবা নতুন গ্রাহক যোগ করতে ওপরের বাটনে চাপুন</p>
                         </td>
                       </tr>
                     ) : (
@@ -1036,22 +1027,22 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                         return (
                           <tr 
                             key={cust.id} 
-                            onClick={() => setSelectedCustomerId(cust.id)}
-                            className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                            className="hover:bg-slate-50/70 transition-colors"
                           >
-                            {/* Name & Phone */}
+                            {/* Name & Phone (Click to open Customer Profile in place) */}
                             <td className="py-3 px-4">
                               <div 
-                                className="flex items-center gap-2.5 select-none"
-                                title="গ্রাহকের বাকী ও বিস্তারিত দেখতে ক্লিক করুন"
+                                onClick={() => setSelectedCustomerId(cust.id)}
+                                className="flex items-center gap-2.5 cursor-pointer group select-none"
+                                title="গ্রাহকের খাতা, সামারী ও পুরাতন অর্ডার দেখতে ক্লিক করুন"
                               >
-                                <div className="w-8 h-8 rounded-full bg-emerald-100 group-hover:bg-indigo-600 group-hover:text-white text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs transition-colors shadow-2xs">
+                                <div className="w-8 h-8 rounded-full bg-emerald-100 group-hover:bg-emerald-600 group-hover:text-white text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs transition-colors shadow-2xs">
                                   {cust.name.slice(0, 1)}
                                 </div>
                                 <div>
-                                  <p className="font-bold text-slate-900 group-hover:text-indigo-600 leading-snug flex items-center gap-1 transition-colors">
-                                    <span className="underline decoration-slate-300 group-hover:decoration-indigo-500 underline-offset-2">{cust.name}</span>
-                                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                                  <p className="font-bold text-slate-900 group-hover:text-emerald-700 leading-snug flex items-center gap-1 transition-colors">
+                                    <span className="underline decoration-slate-300 group-hover:decoration-emerald-500 underline-offset-2">{cust.name}</span>
+                                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 transition-colors" />
                                   </p>
                                   <p className="text-xs text-slate-500 flex items-center gap-1 font-mono">
                                     <Phone className="w-3 h-3 text-slate-400" />
@@ -1103,10 +1094,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                                 {hasDue && (
                                   <button
                                     type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleOpenPayment(cust);
-                                    }}
+                                    onClick={() => handleOpenPayment(cust)}
                                     className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
                                     title="বাকি টাকা জমা নিন"
                                   >
@@ -1119,10 +1107,7 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                                 {hasDue && (
                                   <button
                                     type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleWhatsAppReminder(cust);
-                                    }}
+                                    onClick={() => handleWhatsAppReminder(cust)}
                                     className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
                                     title="হোয়াটসঅ্যাপে তাগাদা পাঠান"
                                   >
@@ -1130,30 +1115,34 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
                                   </button>
                                 )}
 
-                                {/* View Full Profile & Ledger */}
+                                {/* View Full Profile & Ledger In Place */}
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedCustomerId(cust.id);
-                                  }}
-                                  className="p-1.5 text-indigo-700 hover:bg-indigo-50 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
-                                  title="গ্রাহকের বিস্তারিত হিসাব ও খাতা দেখুন"
+                                  onClick={() => setSelectedCustomerId(cust.id)}
+                                  className="p-1.5 text-emerald-700 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                                  title="গ্রাহক সামারী ও পুরাতন অর্ডার দেখুন"
                                 >
-                                  <ChevronRight className="w-4 h-4" />
+                                  <FileText className="w-4 h-4" />
                                 </button>
 
                                 {/* Edit Customer */}
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenEditCustomerModal(cust);
-                                  }}
+                                  onClick={() => handleOpenEditCustomerModal(cust)}
                                   className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                                   title="এডিট করুন"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Delete Customer */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCustomer(cust.id, cust.name)}
+                                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="মুছে ফেলুন"
+                                >
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                             </td>
@@ -2333,11 +2322,13 @@ export const CustomerKhata: React.FC<CustomerKhataProps> = ({
         </div>
       )}
 
-      {/* ORDER DETAILS POPUP MODAL (অর্ডার বিস্তারিত পপআপ হিসেবে প্রদর্শন) */}
+      {/* ============================================================== */}
+      {/* ORDER DETAILS MODAL (অর্ডারের বিস্তারিত পপআপ)                    */}
+      {/* ============================================================== */}
       <OrderDetailsModal
-        order={detailsModalOrder}
-        isOpen={!!detailsModalOrder}
-        onClose={() => setDetailsModalOrder(null)}
+        order={modalOrder}
+        isOpen={!!modalOrder}
+        onClose={() => setModalOrder(null)}
         settings={settings}
         onViewReceipt={onViewReceipt}
       />

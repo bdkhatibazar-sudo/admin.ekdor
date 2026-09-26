@@ -1,29 +1,29 @@
-import { Request, Response, NextFunction } from 'express';
+// src/middleware/auth.ts
+import type { Request, Response, NextFunction } from 'express';
+import { adminAuth } from '../lib/firebase-admin.ts';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 export interface AuthRequest extends Request {
-  user?: {
-    uid: string;
-    email?: string;
-    name?: string;
-  };
+  user?: DecodedIdToken;
 }
 
-export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const requireAuth = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    req.user = {
-      uid: 'demo-user',
-      email: 'demo@ekdor.shop',
-      name: 'দোকানদার',
-    };
-    return next();
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing token' });
   }
 
-  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  req.user = {
-    uid: token || 'demo-user',
-    email: 'user@ekdor.shop',
-    name: 'দোকানদার',
-  };
-  next();
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    console.error('Error verifying Firebase ID token:', error);
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
 };

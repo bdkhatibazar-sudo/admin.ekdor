@@ -1,27 +1,28 @@
-export interface DbUser {
-  id: string;
-  uid: string;
-  email: string;
-  name?: string;
-  createdAt: string;
-}
+// src/db/users.ts
+import { db } from './index.ts';
+import { users } from './schema.ts';
+import { eq } from 'drizzle-orm';
 
-const inMemoryUsers = new Map<string, DbUser>();
+export async function getOrCreateUser(uid: string, email: string, name?: string) {
+  try {
+    const result = await db.insert(users)
+      .values({
+        uid,
+        email,
+        name: name || null,
+      })
+      .onConflictDoUpdate({
+        target: users.uid,
+        set: {
+          email,
+          ...(name ? { name } : {}),
+        },
+      })
+      .returning();
 
-export async function getOrCreateUser(uid: string, email: string, name?: string): Promise<DbUser> {
-  const existing = inMemoryUsers.get(uid);
-  if (existing) {
-    return existing;
+    return result[0];
+  } catch (error) {
+    console.error("Failed to getOrCreateUser:", error);
+    throw new Error("User registration or fetch failed", { cause: error });
   }
-
-  const newUser: DbUser = {
-    id: `user-${Date.now()}`,
-    uid,
-    email,
-    name: name || 'দোকানদার',
-    createdAt: new Date().toISOString(),
-  };
-
-  inMemoryUsers.set(uid, newUser);
-  return newUser;
 }
